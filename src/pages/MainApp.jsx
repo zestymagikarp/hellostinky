@@ -310,43 +310,50 @@ export default function MainApp({ user }) {
     for (const file of Array.from(files)) {
       if (file.type !== 'application/pdf') continue
       const itemKey = Date.now() + file.name
-      setUploadItems(prev => [...prev, { key: itemKey, name: file.name, status: 'loading', msg: 'Reading PDF...' }])
+      const setProgress = (msg, pct) => setUploadItems(prev => prev.map(it =>
+        it.key === itemKey ? { ...it, msg, pct: pct ?? it.pct } : it
+      ))
+      setUploadItems(prev => [...prev, { key: itemKey, name: file.name, status: 'loading', msg: 'Reading PDF...', pct: 0 }])
       try {
-        // Auto-detect: is this a text PDF or a scanned image PDF?
-        setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: 'Detecting PDF type...' } : it))
+        setProgress('Detecting PDF type...', 5)
         const scanned = await isScannedPDF(file)
         let arr = []
 
         if (!scanned) {
-          // ── Text-based PDF: extract text and send to AI ──────────────
-          setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: 'Extracting text from PDF...' } : it))
+          setProgress('Extracting text from PDF...', 15)
           const text = await extractTextFromPDF(file)
-          setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: `Scanning ${Math.round(text.length / 1000)}k characters for recipes...` } : it))
-          arr = await extractRecipesFromText(text)
-        } else {
-          // ── Scanned PDF: render pages as images, send to vision AI ───
-          setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: 'Scanned PDF detected — rendering pages...' } : it))
-          const pages = await extractImagesFromPDF(file, (done, total) => {
-            setUploadItems(prev => prev.map(it => it.key === itemKey
-              ? { ...it, msg: `Rendering page ${done} of ${total}...` } : it))
+          const kb = Math.round(text.length / 1000)
+          setProgress(`Found ${kb}k characters — scanning for recipes...`, 30)
+          // Hook into extractRecipesFromText progress via a wrapper
+          arr = await extractRecipesFromText(text, (chunkDone, chunkTotal) => {
+            const pct = 30 + Math.round((chunkDone / chunkTotal) * 55)
+            setProgress(`Scanning chunk ${chunkDone} of ${chunkTotal}...`, pct)
           })
-          setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: `Reading ${pages.length} pages with AI vision...` } : it))
+        } else {
+          setProgress('Scanned PDF detected — rendering pages...', 10)
+          const pages = await extractImagesFromPDF(file, (done, total) => {
+            const pct = 10 + Math.round((done / total) * 30)
+            setProgress(`Rendering page ${done} of ${total}...`, pct)
+          })
+          setProgress(`Reading ${pages.length} pages with AI vision...`, 40)
           arr = await extractRecipesFromImages(pages, (done, total) => {
-            setUploadItems(prev => prev.map(it => it.key === itemKey
-              ? { ...it, msg: `Reading pages ${done} of ${total} with AI...` } : it))
+            const pct = 40 + Math.round((done / total) * 45)
+            setProgress(`Reading page ${done} of ${total} with AI...`, pct)
           })
         }
 
         if (arr.length === 0) throw new Error('No recipes found. Make sure the PDF contains recipe content.')
-        setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: `Saving ${arr.length} recipes...` } : it))
-        for (const r of arr) {
-          const saved = await saveRecipe({ ...r, emoji: rndEmoji() }, household.id)
+        setProgress(`Saving ${arr.length} recipes...`, 90)
+        for (let i = 0; i < arr.length; i++) {
+          const saved = await saveRecipe({ ...arr[i], emoji: rndEmoji() }, household.id)
           setRecipes(prev => [saved, ...prev])
+          const pct = 90 + Math.round(((i + 1) / arr.length) * 10)
+          setProgress(`Saving recipe ${i + 1} of ${arr.length}...`, pct)
         }
         setUploadItems(prev => prev.map(it => it.key === itemKey
-          ? { ...it, status: 'done', count: arr.length, names: arr.map(r => r.name) } : it))
+          ? { ...it, status: 'done', pct: 100, count: arr.length, names: arr.map(r => r.name) } : it))
       } catch (err) {
-        setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, status: 'err', msg: err.message } : it))
+        setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, status: 'err', pct: 0, msg: err.message } : it))
       }
     }
   }
@@ -626,26 +633,59 @@ export default function MainApp({ user }) {
           </div>
 
           {uploadItems.map(it => (
-            <div key={it.key} className={`upload-item ${it.status === 'done' ? 'done' : it.status === 'err' ? 'err' : ''}`}>
-              {it.status === 'loading' && <div className="spinner" style={{ borderTopColor: '#3c6e47', borderColor: '#c0dd97' }} />}
-              {it.status === 'done' && <span>✓</span>}
-              {it.status === 'err' && <span>✕</span>}
-              <div style={{ flex: 1 }}>
-                {it.status === 'loading' && <div>{it.msg || `Reading "${it.name}"...`}</div>}
-                {it.status === 'done' && (
-                  <>
-                    <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                      Found {it.count} recipe{it.count !== 1 ? 's' : ''} in "{it.name}"
-                    </div>
-                    {it.names && (
-                      <div style={{ fontSize: 11, opacity: 0.8 }}>
-                        {it.names.join(' · ')}
-                      </div>
-                    )}
-                  </>
+            <div key={it.key} style={{
+              background: it.status === 'done' ? '#eaf3de' : it.status === 'err' ? '#fdecea' : '#f5f5f3',
+              borderRadius: 10, padding: '12px 14px', marginBottom: 8,
+              border: `0.5px solid ${it.status === 'done' ? '#c0dd97' : it.status === 'err' ? '#f09595' : 'rgba(0,0,0,0.08)'}`
+            }}>
+              {/* Header row */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: it.status === 'loading' ? 10 : 0 }}>
+                {it.status === 'loading' && <div className="spinner" style={{ borderTopColor: '#3c6e47', borderColor: '#c0dd97', flexShrink: 0 }} />}
+                {it.status === 'done' && <span style={{ color: '#3c6e47', fontSize: 16, flexShrink: 0 }}>✓</span>}
+                {it.status === 'err' && <span style={{ color: '#c0392b', fontSize: 16, flexShrink: 0 }}>✕</span>}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#333', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {it.name}
+                  </div>
+                  <div style={{ fontSize: 12, color: it.status === 'err' ? '#c0392b' : it.status === 'done' ? '#27500a' : '#555' }}>
+                    {it.status === 'loading' && (it.msg || 'Reading...')}
+                    {it.status === 'done' && `Found ${it.count} recipe${it.count !== 1 ? 's' : ''}`}
+                    {it.status === 'err' && it.msg}
+                  </div>
+                </div>
+                {it.status === 'loading' && it.pct > 0 && (
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#3c6e47', flexShrink: 0 }}>{it.pct}%</span>
                 )}
-                {it.status === 'err' && <div>Failed to read "{it.name}" — {it.msg}</div>}
               </div>
+
+              {/* Progress bar */}
+              {it.status === 'loading' && (
+                <div style={{ background: 'rgba(0,0,0,0.08)', borderRadius: 20, height: 6, overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%', borderRadius: 20,
+                    background: 'linear-gradient(90deg, #3c6e47, #5a9c6a)',
+                    width: `${it.pct || 0}%`,
+                    transition: 'width 0.4s ease',
+                    minWidth: it.pct > 0 ? 12 : 0
+                  }} />
+                </div>
+              )}
+
+              {/* Done: recipe names */}
+              {it.status === 'done' && it.names && it.names.length > 0 && (
+                <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {it.names.slice(0, 8).map((name, i) => (
+                    <span key={i} style={{
+                      fontSize: 11, background: '#fff', color: '#27500a',
+                      padding: '2px 8px', borderRadius: 20,
+                      border: '0.5px solid #c0dd97'
+                    }}>{name}</span>
+                  ))}
+                  {it.names.length > 8 && (
+                    <span style={{ fontSize: 11, color: '#3c6e47', padding: '2px 4px' }}>+{it.names.length - 8} more</span>
+                  )}
+                </div>
+              )}
             </div>
           ))}
 

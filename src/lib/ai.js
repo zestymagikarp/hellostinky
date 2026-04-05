@@ -148,7 +148,7 @@ export async function suggestProteinSwaps(recipe) {
   return JSON.parse(cleaned)
 }
 
-export async function extractRecipesFromText(text) {
+export async function extractRecipesFromText(text, onProgress) {
   // Split text by recipe boundaries — look for page markers or recipe titles
   // This is much more efficient than fixed-size chunks
   const CHUNK_SIZE = 4000
@@ -181,8 +181,10 @@ export async function extractRecipesFromText(text) {
   }
 
   let allRecipes = []
-  for (const chunk of chunks) {
-    if (chunk.trim().length < 100) continue
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const chunk = chunks[ci]
+    if (chunk.trim().length < 100) { onProgress && onProgress(ci + 1, chunks.length); continue }
+    onProgress && onProgress(ci + 1, chunks.length)
     try {
       const raw = await callClaude(
         [{ role: 'user', content: `Extract all complete recipes from this text. Only extract recipes that have both ingredients AND instructions. For each recipe return a JSON object with: name, subtitle (one-line description), time (int, total minutes), servings (int, default 4), calories (int per serving — use the value stated if present), price (float, estimated USD per serving 8-14), badge (calorie|quick|gourmet|taste or empty string), tags (array from: chicken,beef,pork,fish,vegetarian,vegan,pasta,healthy,quick,family,spicy), ingredients (array of {item, amount}), seasonal (short note or null). If no complete recipes found return []. Return ONLY a raw JSON array.\n\nText:\n${chunk}` }],
