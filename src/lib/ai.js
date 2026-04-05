@@ -64,8 +64,8 @@ export async function generateGroceryList(meals) {
   }).join('\n')
 
   const raw = await callClaude(
-    [{ role: 'user', content: `Selected meals:\n${details}\n\nCreate an optimized grocery list. Combine duplicates, scale amounts. Return ONLY valid JSON: [{"name":"item","amount":"combined qty","category":"Produce|Meat & Seafood|Dairy|Pantry|Bakery|Frozen|Other","shared":true/false}]` }],
-    'You are a grocery optimizer. Return only a JSON array. No markdown.'
+    [{ role: 'user', content: `Selected meals:\n${details}\n\nCreate an optimized grocery list. Rules:\n1. Combine duplicate ingredients across recipes and sum their amounts\n2. Convert all amounts to practical grocery store units that a shopper would actually buy — never use grams or millilitres in the final output. Use these conversions:\n   - Meat/fish: "X lb" or "X oz" or count (e.g. "2 chicken breasts", "1 lb ground beef", "4 salmon fillets")\n   - Produce: count or bunch (e.g. "2 avocados", "1 bunch cilantro", "3 cloves garlic")\n   - Canned/jarred: "1 can (15oz)", "1 jar (12oz)"\n   - Dairy: "1 cup", "8 oz", "1 block", "1 bag (8oz shredded)"\n   - Liquids/sauces: "1 bottle", "1 cup", or practical size\n   - Spices/seasonings: "to taste" or "1 tsp" if small, "1 bottle" if stocking up\n   - Bread/buns: count (e.g. "4 brioche buns", "1 loaf")\n3. Mark shared:true if the ingredient appears in 2 or more recipes\n4. Return ONLY valid JSON: [{"name":"item","amount":"store-friendly qty","category":"Produce|Meat & Seafood|Dairy|Pantry|Bakery|Frozen|Other","shared":true/false}]` }],
+    'You are a grocery list expert who converts recipe quantities into practical store-friendly amounts. Return only a JSON array. No markdown.'
   )
   return parseJSON(raw)
 }
