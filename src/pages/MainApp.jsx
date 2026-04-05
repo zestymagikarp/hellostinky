@@ -134,6 +134,10 @@ export default function MainApp({ user }) {
   async function handleFiles(files) {
     for (const file of Array.from(files)) {
       if (file.type !== 'application/pdf') continue
+      if (file.size > 15 * 1024 * 1024) {
+        setUploadItems(prev => [...prev, { key: Date.now() + file.name, name: file.name, status: 'err', msg: 'File too large (max 15MB). Try splitting the PDF into smaller parts.' }])
+        continue
+      }
       const itemKey = Date.now() + file.name
       setUploadItems(prev => [...prev, { key: itemKey, name: file.name, status: 'loading', msg: 'Reading PDF...' }])
       try {
