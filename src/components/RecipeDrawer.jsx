@@ -11,6 +11,12 @@ function safeIngredients(recipe) {
   return Array.isArray(ings) ? ings : []
 }
 
+function safeTags(recipe) {
+  let tags = recipe?.tags || []
+  if (typeof tags === 'string') { try { tags = JSON.parse(tags) } catch { tags = [] } }
+  return Array.isArray(tags) ? tags : []
+}
+
 export default function RecipeDrawer({ recipe, onClose, householdId, userId, mealNotes = {}, onNoteUpdate }) {
   const [drawerError, setDrawerError] = useState(false)
   const [servings, setServings] = useState(recipe?.servings || 4)
@@ -463,11 +469,11 @@ export default function RecipeDrawer({ recipe, onClose, householdId, userId, mea
                 ))}
               </div>
 
-              {(recipe.tags || []).length > 0 && (
+              {safeTags(recipe).length > 0 && (
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>Tags</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {recipe.tags.map(tag => (
+                    {safeTags(recipe).map(tag => (
                       <span key={tag} style={{
                         background: '#f0f0ee', color: '#555',
                         padding: '4px 10px', borderRadius: 20, fontSize: 12

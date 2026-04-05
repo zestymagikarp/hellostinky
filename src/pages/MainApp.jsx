@@ -186,6 +186,25 @@ export default function MainApp({ user }) {
     return map
   }
 
+  // Compute how many ingredients a recipe shares with currently selected meals
+  function computeOverlap(recipe, selectedIds, menuList) {
+    if (!selectedIds.includes(recipe.id) || selectedIds.length < 2) return 0
+    let ings = recipe.ingredients || []
+    if (typeof ings === 'string') { try { ings = JSON.parse(ings) } catch { ings = [] } }
+    if (!Array.isArray(ings)) return 0
+    const myItems = new Set(ings.map(i => i.item?.toLowerCase()).filter(Boolean))
+    let count = 0
+    selectedIds.filter(id => String(id) !== String(recipe.id)).forEach(id => {
+      const other = menuList.find(r => String(r.id) === String(id))
+      if (!other) return
+      let oings = other.ingredients || []
+      if (typeof oings === 'string') { try { oings = JSON.parse(oings) } catch { oings = [] } }
+      if (!Array.isArray(oings)) return
+      oings.forEach(i => { if (i.item && myItems.has(i.item.toLowerCase())) count++ })
+    })
+    return count
+  }
+
   async function togglePick(id) {
     const next = myPicks.includes(id)
       ? myPicks.filter(x => x !== id)
@@ -686,6 +705,7 @@ export default function MainApp({ user }) {
                     pickedBy={nextPickerMap[r.id] || []}
                     memberNames={memberNames}
                     onToggle={handleAddToBox}
+                    overlapCount={computeOverlap(r, nextWeekPicks, nextWeekMenu)}
                   />
                   <button onClick={() => setSelectedRecipe(r)} style={{
                     position: 'absolute', top: 8, right: 8,

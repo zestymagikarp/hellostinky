@@ -2,16 +2,22 @@ const BADGE_CSS = { calorie: 'badge-calorie', quick: 'badge-quick', gourmet: 'ba
 const BADGE_LABELS = { calorie: 'Calorie Smart', quick: '20-Min Meal', gourmet: 'Gourmet', taste: 'Taste Tours' }
 const MEMBER_COLORS = ['#3c6e47', '#e8a020', '#1e40af', '#9333ea', '#dc2626']
 
-export default function MealCard({ recipe, isSelected, pickedBy = [], memberNames = {}, onToggle }) {
-  const myPick = isSelected
-  const partnerPicks = pickedBy.filter(uid => !myPick || true) // all pickers
+function safeTags(recipe) {
+  let tags = recipe?.tags || []
+  if (typeof tags === 'string') { try { tags = JSON.parse(tags) } catch { tags = [] } }
+  return Array.isArray(tags) ? tags : []
+}
 
-  function getOverlapCount() {
-    return 0 // parent passes pre-computed value if needed
-  }
+function safeIngredients(recipe) {
+  let ings = recipe?.ingredients || []
+  if (typeof ings === 'string') { try { ings = JSON.parse(ings) } catch { ings = [] } }
+  return Array.isArray(ings) ? ings : []
+}
 
+export default function MealCard({ recipe, isSelected, pickedBy = [], memberNames = {}, onToggle, overlapCount = 0 }) {
   const isBothPicked = pickedBy.length >= 2
   const isPartnerPicked = pickedBy.length === 1 && !isSelected
+  const tags = safeTags(recipe)
 
   let cardClass = 'meal-card'
   if (isSelected && isBothPicked) cardClass += ' both-picked'
@@ -43,8 +49,8 @@ export default function MealCard({ recipe, isSelected, pickedBy = [], memberName
         {recipe.subtitle && <div className="meal-sub">{recipe.subtitle}</div>}
         <div className="meal-meta">
           <span>{recipe.time || 30} min</span>
-          {recipe.tags?.includes('family') && <><span className="dot">·</span><span>Family</span></>}
-          {recipe.tags?.includes('vegetarian') && <><span className="dot">·</span><span>Veggie</span></>}
+          {tags.includes('family') && <><span className="dot">·</span><span>Family</span></>}
+          {tags.includes('vegetarian') && <><span className="dot">·</span><span>Veggie</span></>}
         </div>
         {recipe.calories && (
           <div style={{ marginTop: 4 }}>
@@ -56,18 +62,21 @@ export default function MealCard({ recipe, isSelected, pickedBy = [], memberName
             <span className="seasonal-pill">🌿 {recipe.seasonal}</span>
           </div>
         )}
-        {isPartnerPicked && (
-          <div style={{ marginTop: 3 }}>
-            <span style={{ fontSize: 11, color: '#e8a020', fontWeight: 500 }}>
-              ★ Partner picked
+        {overlapCount > 0 && isSelected && (
+          <div style={{ marginTop: 4 }}>
+            <span className="overlap-pill">
+              <span style={{ fontSize: 9 }}>●</span> {overlapCount} shared ingredient{overlapCount > 1 ? 's' : ''}
             </span>
+          </div>
+        )}
+        {isPartnerPicked && !isBothPicked && (
+          <div style={{ marginTop: 3 }}>
+            <span style={{ fontSize: 11, color: '#e8a020', fontWeight: 500 }}>★ Partner picked</span>
           </div>
         )}
         {isBothPicked && (
           <div style={{ marginTop: 3 }}>
-            <span style={{ fontSize: 11, color: '#3c6e47', fontWeight: 500 }}>
-              ✓ Both picked
-            </span>
+            <span style={{ fontSize: 11, color: '#3c6e47', fontWeight: 500 }}>✓ Both picked</span>
           </div>
         )}
       </div>
