@@ -316,3 +316,43 @@ export async function getMealSchedule(householdId, weekStart) {
 export async function saveMealSchedule(householdId, weekStart, schedule) {
   await supabase.from('meal_schedule').upsert({ household_id: householdId, week_start: weekStart, schedule, updated_at: new Date().toISOString() }, { onConflict: 'household_id,week_start' })
 }
+
+// ── Week promotion ───────────────────────────────────────────
+// Moves next week's menu + all picks into this week, then clears next week
+export async function promoteNextWeekToThisWeek(householdId) {
+  const thisWeekStart = getWeekStart(0)
+  const nextWeekStart = getWeekStart(1)
+
+  // 1. Load next week's menu
+  const nextMenu = await getNextWeekMenu(householdId)
+  if (!nextMenu?.meals) return false
+
+  // 2. Load all next week picks for this household
+  const { data: nextPicks } = await supabase
+    .from('picks')
+    .select('*')
+    .eq('household_id', householdId)
+    .eq('week_start', nextWeekStart)
+
+  // 3. Overwrite this week's menu with next week's menu
+  await supabase.from('weekly_menus')
+    .upsert({ household_id: householdId, week_start: thisWeekStart, meals: nextMenu.meals },
+      { onConflict: 'household_id,week_start' })
+
+  // 4. Overwrite this week's picks with next week's picks for each member
+  if (nextPicks && nextPicks.length > 0) {
+    for (const pick of nextPicks) {
+      await supabase.from('picks')
+        .upsert({ household_id: householdId, user_id: pick.user_id, week_start: thisWeekStart, meal_ids: pick.meal_ids },
+          { onConflict: 'household_id,user_id,week_start' })
+    }
+  }
+
+  // 5. Delete next week's menu and picks (they'll be regenerated fresh)
+  await supabase.from('weekly_menus').delete()
+    .eq('household_id', householdId).eq('week_start', nextWeekStart)
+  await supabase.from('picks').delete()
+    .eq('household_id', householdId).eq('week_start', nextWeekStart)
+
+  return true
+}

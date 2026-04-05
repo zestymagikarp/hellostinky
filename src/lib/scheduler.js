@@ -73,7 +73,7 @@ function getMsUntilNextMonday6am() {
 }
 
 // ── Main scheduler hook ──────────────────────────────────────
-export function useScheduler({ householdId, userId, weeklyMenu, myPicks, onClearBox, onRefreshMenu, onArchiveWeek }) {
+export function useScheduler({ householdId, userId, weeklyMenu, myPicks, onClearBox, onRefreshMenu, onArchiveWeek, onPromoteWeek }) {
   const timersRef = useRef([])
 
   function clearTimers() {
@@ -103,11 +103,11 @@ export function useScheduler({ householdId, userId, weeklyMenu, myPicks, onClear
       // Re-schedule for next week
     }, thursdayDelay)
 
-    // ── Sunday 11pm: archive and clear box ────────────────
+    // ── Sunday 11pm: archive this week, promote next week → this week ──
     const sundayDelay = getMsUntilSunday11pm()
     addTimer(async () => {
+      // 1. Archive current this-week meals before overwriting
       if (weeklyMenu.length > 0 && myPicks.length > 0) {
-        // Archive before clearing
         const now = new Date()
         const day = now.getDay()
         const diff = now.getDate() - day + (day === 0 ? -6 : 1)
@@ -115,13 +115,18 @@ export function useScheduler({ householdId, userId, weeklyMenu, myPicks, onClear
         const weekStart = monday.toISOString().split('T')[0]
         await onArchiveWeek(weeklyMenu.filter(r => myPicks.includes(r.id)), weekStart)
       }
-      await onClearBox()
+      // 2. Promote next week picks → this week (replaces clear)
+      if (onPromoteWeek) {
+        await onPromoteWeek()
+      } else {
+        await onClearBox()
+      }
     }, sundayDelay)
 
-    // ── Monday 6am: refresh weekly menu ───────────────────
+    // ── Monday 6am: generate a fresh NEXT week menu ───────
     const mondayDelay = getMsUntilNextMonday6am()
     addTimer(() => {
-      onRefreshMenu()
+      onRefreshMenu() // this now calls refreshNextWeekMenu in MainApp
     }, mondayDelay)
 
     return clearTimers

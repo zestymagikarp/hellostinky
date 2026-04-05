@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { supabase, getMyHousehold, getRecipes, getWeeklyMenu, saveWeeklyMenu, getMyPicks, savePicks, getAllPicks, getHouseholdMembers, saveRecipe, deleteRecipe, saveRating, archiveWeek, getNextWeekMenu, saveNextWeekMenu, getMyNextWeekPicks, saveNextWeekPicks, getAllNextWeekPicks, getMealNotes, getPantry } from '../lib/supabase'
+import { supabase, getMyHousehold, getRecipes, getWeeklyMenu, saveWeeklyMenu, getMyPicks, savePicks, getAllPicks, getHouseholdMembers, saveRecipe, deleteRecipe, saveRating, archiveWeek, getNextWeekMenu, saveNextWeekMenu, getMyNextWeekPicks, saveNextWeekPicks, getAllNextWeekPicks, getMealNotes, getPantry, promoteNextWeekToThisWeek } from '../lib/supabase'
 import { generateWeeklyMenu, generateGroceryList, extractRecipesFromText, extractRecipesFromImages, fetchHomeChefNutrition, extractHomeChefUrls } from '../lib/ai'
 import { extractTextFromPDF, extractImagesFromPDF, isScannedPDF } from '../lib/pdfExtract'
 import { useScheduler, requestNotificationPermission } from '../lib/scheduler'
@@ -49,6 +49,7 @@ export default function MainApp({ user }) {
   const [nextWeekAllPicks, setNextWeekAllPicks] = useState([])
   const [nextMenuLoading, setNextMenuLoading] = useState(false)
   const [nextWeekFilter, setNextWeekFilter] = useState('')
+  const [promoting, setPromoting] = useState(false)
   // Tracks user-chosen serving sizes per recipe (recipe id -> servings)
   const [recipeScaling, setRecipeScaling] = useState({})
   // Meal notes, pantry, preferences state
@@ -81,8 +82,9 @@ export default function MainApp({ user }) {
     weeklyMenu,
     myPicks,
     onClearBox: clearBox,
-    onRefreshMenu: () => refreshWeeklyMenu(),
+    onRefreshMenu: () => refreshNextWeekMenu(), // Monday refresh generates NEXT week, not this week
     onArchiveWeek: handleArchiveWeek,
+    onPromoteWeek: handlePromoteWeek, // Sunday night promotes next→this
   })
 
   async function loadAll() {
@@ -280,6 +282,24 @@ export default function MainApp({ user }) {
   async function handleArchiveWeek(meals, weekStart) {
     if (!household) return
     await archiveWeek(household.id, meals, weekStart)
+  }
+
+  async function handlePromoteWeek() {
+    if (!household) return
+    setPromoting(true)
+    try {
+      const ok = await promoteNextWeekToThisWeek(household.id)
+      if (ok) {
+        // Reload everything so UI reflects promotion
+        await loadAll()
+        setTab('thisweek')
+      } else {
+        alert('No next week box to confirm yet — pick your meals first.')
+      }
+    } catch (e) {
+      alert('Could not confirm box: ' + e.message)
+    }
+    setPromoting(false)
   }
 
   async function handleReAddRecipe(meal) {
@@ -630,19 +650,36 @@ export default function MainApp({ user }) {
                   </div>
                 </div>
                 {nextCombinedMeals.length > 0 && (
-                  <button
-                    onClick={buildNextWeekGroceryList}
-                    disabled={groceryLoading}
-                    style={{
-                      background: '#3c6e47', color: '#fff', border: 'none',
-                      borderRadius: 10, padding: '9px 14px', fontSize: 13,
-                      fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
-                      display: 'flex', alignItems: 'center', gap: 6,
-                      opacity: groceryLoading ? 0.7 : 1
-                    }}
-                  >
-                    {groceryLoading ? '⏳ Building...' : '🛒 Confirm & build grocery list'}
-                  </button>
+                  <div style={{ display: 'flex', gap: 8, flexDirection: 'column', alignItems: 'flex-end' }}>
+                    <button
+                      onClick={buildNextWeekGroceryList}
+                      disabled={groceryLoading}
+                      style={{
+                        background: '#3c6e47', color: '#fff', border: 'none',
+                        borderRadius: 10, padding: '9px 14px', fontSize: 13,
+                        fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        opacity: groceryLoading ? 0.7 : 1
+                      }}
+                    >
+                      {groceryLoading ? '⏳ Building...' : '🛒 Build grocery list'}
+                    </button>
+                    <button
+                      onClick={handlePromoteWeek}
+                      disabled={promoting}
+                      style={{
+                        background: nextWeekPicks.length >= mealsPerWeek ? '#1e40af' : '#888',
+                        color: '#fff', border: 'none',
+                        borderRadius: 10, padding: '9px 14px', fontSize: 13,
+                        fontWeight: 600, cursor: nextWeekPicks.length >= mealsPerWeek ? 'pointer' : 'not-allowed',
+                        whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6,
+                        opacity: promoting ? 0.7 : 1
+                      }}
+                      title={nextWeekPicks.length < mealsPerWeek ? `Pick ${mealsPerWeek - nextWeekPicks.length} more meal${mealsPerWeek - nextWeekPicks.length > 1 ? 's' : ''} first` : 'Move this box to This week tab'}
+                    >
+                      {promoting ? '⏳ Confirming...' : '✅ Confirm box → This week'}
+                    </button>
+                  </div>
                 )}
               </div>
 
