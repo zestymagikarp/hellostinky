@@ -55,6 +55,55 @@ export async function generateWeeklyMenu(recipes, preferences = {}) {
 }
 
 // ── Grocery list ─────────────────────────────────────────────
+// Common store sizes for items the AI tends to be vague about
+const STORE_SIZES = {
+  'mayo': '1 jar (30oz)', 'light mayo': '1 jar (30oz)', 'mayonnaise': '1 jar (30oz)',
+  'honey': '1 bottle (12oz)', 'hot honey': '1 bottle (12oz)',
+  'habanero hot sauce': '1 bottle (5oz)', 'hot sauce': '1 bottle (5oz)', 'buffalo sauce': '1 bottle (12oz)',
+  'sriracha': '1 bottle (17oz)', 'gochujang': '1 jar (7oz)',
+  'bbq sauce': '1 bottle (18oz)', 'g. hughes bbq sauce': '1 bottle (18oz)',
+  'red enchilada sauce': '1 can (10oz)', 'green enchilada sauce': '1 can (10oz)',
+  'enchilada sauce': '1 can (10oz)',
+  'salsa': '1 jar (16oz)', 'salsa verde': '1 jar (16oz)',
+  'tomato sauce': '1 can (15oz)', 'marinara sauce': '1 jar (24oz)',
+  'crushed tomatoes': '1 can (28oz)', 'diced tomatoes': '1 can (14.5oz)',
+  'tomato paste': '1 can (6oz)',
+  'black beans': '1 can (15oz)', 'chickpeas': '1 can (15oz)',
+  'chicken broth': '1 carton (32oz)', 'beef broth': '1 carton (32oz)',
+  'coconut milk': '1 can (13.5oz)',
+  'ranch dressing': '1 bottle (16oz)', 'bolthouse farms ranch': '1 bottle (10oz)',
+  'bolthouse farms ranch dressing': '1 bottle (10oz)',
+  'soy sauce': '1 bottle (10oz)',
+  'worcestershire sauce': '1 bottle (10oz)',
+  'adobo sauce': '1 can (7oz)',
+  'greek yogurt': '1 container (32oz)', '2% greek yogurt': '1 container (32oz)',
+  '0% greek yogurt': '1 container (32oz)',
+  'cottage cheese': '1 container (16oz)', '2% cottage cheese': '1 container (16oz)',
+  'light sour cream': '1 container (16oz)', 'sour cream': '1 container (16oz)',
+  'cream cheese': '1 block (8oz)',
+  'shredded cheddar': '1 bag (8oz)', '2% shredded cheddar': '1 bag (8oz)',
+  'shredded mozzarella': '1 bag (8oz)', 'reduced fat mozzarella': '1 bag (8oz)',
+  'provolone': '1 package (~6 slices)', 'american cheese': '1 package (12 slices)',
+  'parmigiano reggiano': '1 wedge (6oz)',
+  'light butter': '1 stick (4oz)',
+  'laughing cow wedges': '1 package (6 wedges)',
+}
+
+function enrichAmount(name, amount) {
+  // If amount already has oz/lb/fl oz/count in parens, it's fine
+  if (/\d+\s*(oz|lb|fl|ml|g)/.test(amount) || /\(\d/.test(amount)) return amount
+  // Check if it's just "1 bottle", "1 jar", "1 can", "1 package" etc
+  if (/^[\d.]+\s*(bottle|jar|can|package|container|bag|block|carton|wedge|stick)s?$/i.test(amount.trim())) {
+    const key = name.toLowerCase().trim()
+    if (STORE_SIZES[key]) return STORE_SIZES[key]
+    // Try partial match
+    for (const [k, v] of Object.entries(STORE_SIZES)) {
+      if (key.includes(k) || k.includes(key)) return v
+    }
+  }
+  return amount
+}
+
 export async function generateGroceryList(meals, householdSize = 2) {
   const details = meals.map(r => {
     let ings = r.ingredients || []
@@ -68,7 +117,7 @@ export async function generateGroceryList(meals, householdSize = 2) {
 
   const raw = await callClaude(
     [{ role: 'user', content: `I am cooking for ${householdSize} people. Here are the selected meals with their ingredients:\n\n${details}\n\nCreate an optimized grocery list. Rules:\n1. Each recipe shows its base serving count and the target serving count to USE. Scale ingredient amounts from base to target (e.g. if base is 2 servings and target is 6, multiply all amounts by 3).\n2. After scaling, combine the same ingredient across multiple recipes by adding the scaled amounts together. For example if recipe A needs 0.75 avocado and recipe B needs 0.5 avocado after scaling, that's 1.25 avocados total → round up to 2 avocados.\n3. Convert all final amounts to practical grocery store units — never use grams or millilitres. Use real store sizes:\n   - Meat/fish: count or lbs (e.g. "2 chicken breasts (~1.5 lb)", "1 lb ground beef", "4 salmon fillets")\n   - Produce: count or bunch, always round UP to whole units (e.g. "2 avocados", "1 bunch cilantro", "1 head garlic")\n   - Canned goods: include the real can/jar size in oz that you'd find at the store, e.g. "1 can (10oz) red enchilada sauce", "2 cans (15oz each) black beans", "1 can (28oz) crushed tomatoes", "1 jar (16oz) salsa". Common sizes: enchilada sauce 10oz or 19oz, black beans 15oz, diced tomatoes 14.5oz, tomato sauce 8oz or 15oz, coconut milk 13.5oz, chicken broth 14.5oz\n   - Condiments/sauces in bottles: "1 bottle hot sauce", "1 bottle (12oz) BBQ sauce"\n   - Dairy: practical container size (e.g. "1 container (16oz) Greek yogurt", "1 bag (8oz) shredded cheddar", "1 block (8oz) cream cheese")\n   - Spices used in small amounts (under 2 tsp total): "to taste"\n   - Bread/buns: whole count (e.g. "4 brioche buns", "1 loaf sourdough")\n   - Eggs: "X eggs"\n4. Mark shared:true if the ingredient appears in 2 or more recipes\n5. Return ONLY valid JSON: [{"name":"item","amount":"store-friendly qty with size","category":"Produce|Meat & Seafood|Dairy|Pantry|Bakery|Frozen|Other","shared":true/false}]` }],
-    'You are a grocery list expert. Scale recipe amounts to the household size, combine shared ingredients correctly, and output practical store-friendly quantities. Return only a JSON array. No markdown.',
+    'You are a grocery list expert. CRITICAL RULE: Every single item MUST include the specific size/weight in the amount field. NEVER write just "1 bottle", "1 jar", "1 can", "1 package" — ALWAYS include the oz/lb/count, e.g. "1 bottle (12oz)", "1 jar (10oz)", "1 can (15oz)", "1 package (8oz)". If you are unsure of the exact size, use the most common store size for that item. No exceptions. Return only a JSON array. No markdown.',
     2000
   )
   return parseJSON(raw)
