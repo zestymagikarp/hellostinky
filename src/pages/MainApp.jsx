@@ -8,7 +8,6 @@ import RecipeDrawer from '../components/RecipeDrawer'
 import RatingModal from '../components/RatingModal'
 import HistoryTab from '../components/HistoryTab'
 import PantryTracker from '../components/PantryTracker'
-import ProteinSwapModal from '../components/ProteinSwapModal'
 import WeekCalendar from '../components/WeekCalendar'
 import PreferencesPanel from '../components/PreferencesPanel'
 
@@ -43,7 +42,6 @@ export default function MainApp({ user }) {
   const [nextWeekAllPicks, setNextWeekAllPicks] = useState([])
   const [nextMenuLoading, setNextMenuLoading] = useState(false)
   const [nextWeekFilter, setNextWeekFilter] = useState('')
-  const [proteinSwapRecipe, setProteinSwapRecipe] = useState(null) // recipe pending add-to-box
   // Meal notes, pantry, preferences state
   const [mealNotes, setMealNotes] = useState({})
   const [pantryItems, setPantryItems] = useState([])
@@ -123,28 +121,9 @@ export default function MainApp({ user }) {
     setNextWeekAllPicks(ap)
   }
 
-  // Called when user taps "Add to box" on next week menu — show protein swap modal first
+  // Called when user taps "Add to box" on next week menu
   function handleAddToBox(id) {
-    const recipe = nextWeekMenu.find(r => r.id === id)
-    // If already in box, remove immediately (no swap needed)
-    if (nextWeekPicks.includes(id)) {
-      toggleNextWeekPick(id)
-      return
-    }
-    // Show protein swap modal before adding
-    setProteinSwapRecipe(recipe)
-  }
-
-  // Called when user confirms from protein swap modal (with or without swap)
-  async function handleProteinSwapConfirm(recipeWithSwap) {
-    // If protein was swapped, update the recipe in nextWeekMenu in memory
-    if (recipeWithSwap._proteinSwap) {
-      setNextWeekMenu(prev => prev.map(r =>
-        r.id === recipeWithSwap.id ? { ...r, ...recipeWithSwap } : r
-      ))
-    }
-    setProteinSwapRecipe(null)
-    await toggleNextWeekPick(recipeWithSwap.id)
+    toggleNextWeekPick(id)
   }
 
   async function toggleNextWeekPick(id) {

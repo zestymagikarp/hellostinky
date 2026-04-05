@@ -6,6 +6,7 @@ const BADGE_LABELS = { calorie: 'Calorie Smart', quick: '20-Min Meal', gourmet: 
 const BADGE_CSS = { calorie: 'badge-calorie', quick: 'badge-quick', gourmet: 'badge-gourmet', taste: 'badge-taste' }
 
 export default function RecipeDrawer({ recipe, onClose, householdId, userId, mealNotes = {}, onNoteUpdate }) {
+  const [drawerError, setDrawerError] = useState(false)
   const [servings, setServings] = useState(recipe?.servings || 4)
   const [instructions, setInstructions] = useState(null)
   const [loadingInstructions, setLoadingInstructions] = useState(false)
@@ -30,6 +31,7 @@ export default function RecipeDrawer({ recipe, onClose, householdId, userId, mea
       setProteinSwaps(null)
       setSelectedProtein(null)
       setCalAdjustment(0)
+      setDrawerError(false)
     }
   }, [recipe?.id])
 
@@ -79,6 +81,16 @@ export default function RecipeDrawer({ recipe, onClose, householdId, userId, mea
   }
 
   if (!recipe) return null
+  if (drawerError) return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 200 }} />
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#fff', borderRadius: '16px 16px 0 0', zIndex: 201, padding: '24px 16px', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>{recipe.name}</div>
+        <div style={{ fontSize: 13, color: '#888', marginBottom: 16 }}>Could not load full recipe details.</div>
+        <button onClick={onClose} className="btn btn-green btn-sm btn-full">Close</button>
+      </div>
+    </>
+  )
 
   return (
     <>
@@ -215,13 +227,15 @@ export default function RecipeDrawer({ recipe, onClose, householdId, userId, mea
                   </div>
                 ))
               )}
-              <MealNoteEditor
-                householdId={householdId}
-                mealName={recipe?.name}
-                existingNote={mealNotes[recipe?.name]}
-                userId={userId}
-                onUpdate={onNoteUpdate}
-              />
+              {householdId && userId && (
+                <MealNoteEditor
+                  householdId={householdId}
+                  mealName={recipe?.name}
+                  existingNote={mealNotes[recipe?.name]}
+                  userId={userId}
+                  onUpdate={onNoteUpdate}
+                />
+              )}
             </div>
           )}
 
