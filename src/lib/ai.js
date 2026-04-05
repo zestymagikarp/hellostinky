@@ -22,7 +22,12 @@ export async function callClaude(messages, system, maxTokens = 2000) {
 }
 
 export function parseJSON(raw) {
-  return JSON.parse(raw.replace(/```json|```/g, '').trim())
+  let cleaned = raw.replace(/```json|```/g, '').trim()
+  // Find the outermost [ ... ] array
+  const start = cleaned.indexOf('[')
+  const end = cleaned.lastIndexOf(']')
+  if (start !== -1 && end !== -1) cleaned = cleaned.slice(start, end + 1)
+  return JSON.parse(cleaned)
 }
 
 export async function generateWeeklyMenu(recipes) {
@@ -36,11 +41,11 @@ export async function generateWeeklyMenu(recipes) {
     prompt = `It is ${month}. I have these recipes:\n${pool}\n\nSelect 15-20 recipes for this week's menu. Prioritize: (1) seasonal ingredients for ${month}, (2) maximum ingredient overlap to minimize grocery waste. For each recipe, add/update "seasonal" (short note or null) and estimate "calories" per serving if missing. Return ONLY a JSON array using the original recipe IDs plus updated fields. Keep all original recipe data.`
     system = 'You are a seasonal meal planning optimizer. Return only a valid JSON array. No markdown, no explanation.'
   } else {
-    prompt = `It is ${month}. Generate exactly 17 diverse seasonal meal recipes. Maximize ingredient overlap across the full set to minimize grocery shopping. Each needs: name, subtitle, time (int, minutes), servings (4), calories (int, per serving), price (float, 9-12), badge (calorie|quick|gourmet|taste|""), tags (array from: chicken,beef,pork,fish,vegetarian,pasta,healthy,quick,family,spicy), ingredients (array of {item,amount}), seasonal (short note or null). Include 3+ vegetarian options. Return ONLY a JSON array.`
+    prompt = `It is ${month}. Generate 12 diverse seasonal meal recipes with maximum ingredient overlap to minimize grocery shopping. Return a JSON array where each object has exactly these fields: name (string), subtitle (string), time (integer minutes), servings (integer, use 4), calories (integer per serving), price (float 9-12), badge (calorie or quick or gourmet or taste or empty string), tags (array of strings), ingredients (array of objects with item and amount fields), seasonal (string or null). Include 2 vegetarian options. Return ONLY the JSON array, nothing else.`
     system = 'You are a seasonal recipe generator. Return only a valid JSON array. No markdown, no explanation.'
   }
 
-  const raw = await callClaude([{ role: 'user', content: prompt }], system, 3000)
+  const raw = await callClaude([{ role: 'user', content: prompt }], system, 6000)
   return parseJSON(raw)
 }
 
