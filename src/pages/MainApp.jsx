@@ -768,7 +768,6 @@ export default function MainApp({ user }) {
           )}
         </div>
       )}
-    </div>
 
       {/* ── History Tab ── */}
       {tab === 'history' && (
@@ -779,7 +778,7 @@ export default function MainApp({ user }) {
         </div>
       )}
 
-      {/* ── Account Tab notifications section ── */}
+      {/* ── Floating notification prompt on account tab ── */}
       {tab === 'account' && !notificationsEnabled && (
         <div style={{ position: 'fixed', bottom: 16, left: 16, right: 16, zIndex: 50 }}>
           <div style={{ background: '#3c6e47', color: '#fff', borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
@@ -802,13 +801,6 @@ export default function MainApp({ user }) {
           onSkip={() => { setShowRating(false); setMealsToRate([]) }}
         />
       )}
-
-      {/* ── Protein Swap Modal ── */}
-      <ProteinSwapModal
-        recipe={proteinSwapRecipe}
-        onConfirm={handleProteinSwapConfirm}
-        onCancel={() => setProteinSwapRecipe(null)}
-      />
 
       {/* ── Recipe Drawer ── */}
       <RecipeDrawer
