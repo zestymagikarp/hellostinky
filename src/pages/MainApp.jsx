@@ -287,9 +287,12 @@ export default function MainApp({ user }) {
   }
 
   async function buildNextWeekGroceryList() {
-    const pickerMap = getNextWeekPickerMap()
-    const combinedIds = Object.keys(pickerMap).map(Number)
-    const sel = nextWeekMenu.filter(r => combinedIds.includes(r.id))
+    // Use string comparison to handle ID type mismatches between DB and in-memory
+    const allPickedIds = new Set([
+      ...nextWeekPicks.map(String),
+      ...nextWeekAllPicks.filter(p => p.user_id !== user.id).flatMap(p => (p.meal_ids || []).map(String))
+    ])
+    const sel = nextWeekMenu.filter(r => allPickedIds.has(String(r.id)))
     if (!sel.length) { alert('No meals in your next week box yet!'); return }
     setGroceryLoading(true)
     try {
