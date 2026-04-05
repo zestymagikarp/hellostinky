@@ -80,6 +80,47 @@ export async function extractRecipesFromPDF(base64Data) {
   return JSON.parse(cleaned)
 }
 
+export async function extractRecipesFromImages(pages, onProgress) {
+  // Send pages in batches of 3 to stay under size limits
+  const BATCH = 3
+  let allRecipes = []
+
+  for (let i = 0; i < pages.length; i += BATCH) {
+    const batch = pages.slice(i, i + BATCH)
+    onProgress && onProgress(i + batch.length, pages.length)
+
+    const imageContent = batch.map(p => ({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/jpeg', data: p.b64 }
+    }))
+
+    try {
+      const raw = await callClaude(
+        [{
+          role: 'user',
+          content: [
+            ...imageContent,
+            {
+              type: 'text',
+              text: `These are pages ${i + 1}–${i + batch.length} of ${pages[0].totalPages} from a recipe PDF. Extract every complete recipe you can see. For each recipe return a JSON object with: name, subtitle (one-line description), time (int, total minutes), servings (int, default 4), calories (int per serving, estimate if needed), price (float, estimated USD per serving 8-14), badge (calorie|quick|gourmet|taste or empty string), tags (array from: chicken,beef,pork,fish,vegetarian,vegan,pasta,healthy,quick,family,spicy), ingredients (array of {item, amount}), seasonal (short note or null). If no complete recipes are visible on these pages return []. Return ONLY a raw JSON array.`
+            }
+          ]
+        }],
+        'You are a recipe extraction assistant reading scanned cookbook pages. Return only a raw valid JSON array. No markdown, no backticks.',
+        3000
+      )
+      let cleaned = raw.trim()
+      const s = cleaned.indexOf('['), e = cleaned.lastIndexOf(']')
+      if (s !== -1 && e !== -1) cleaned = cleaned.slice(s, e + 1)
+      const found = JSON.parse(cleaned)
+      if (Array.isArray(found)) allRecipes = [...allRecipes, ...found]
+    } catch (err) {
+      console.warn(`Batch ${i}–${i + BATCH} failed:`, err.message)
+    }
+  }
+  return allRecipes
+}
+
 export async function generateRecipeInstructions(recipe) {
   const ingredients = (recipe.ingredients || []).map(i => `${i.item}: ${i.amount}`).join('\n')
   const raw = await callClaude(
@@ -105,4 +146,33 @@ export async function suggestProteinSwaps(recipe) {
   const s = cleaned.indexOf('{'), e = cleaned.lastIndexOf('}')
   if (s !== -1 && e !== -1) cleaned = cleaned.slice(s, e + 1)
   return JSON.parse(cleaned)
+}
+
+export async function extractRecipesFromText(text) {
+  // Split into chunks of ~6000 chars to stay well under limits
+  const CHUNK_SIZE = 6000
+  const chunks = []
+  for (let i = 0; i < text.length; i += CHUNK_SIZE) {
+    chunks.push(text.slice(i, i + CHUNK_SIZE))
+  }
+
+  let allRecipes = []
+  for (const chunk of chunks) {
+    if (chunk.trim().length < 50) continue // skip near-empty chunks
+    try {
+      const raw = await callClaude(
+        [{ role: 'user', content: `Extract all recipes from this text. For each recipe return a JSON object with: name, subtitle (one-line description), time (int, total minutes), servings (int, default 4), calories (int per serving, estimate if needed), price (float, estimated USD per serving 8-14), badge (calorie|quick|gourmet|taste or empty string), tags (array from: chicken,beef,pork,fish,vegetarian,vegan,pasta,healthy,quick,family,spicy), ingredients (array of {item, amount}), seasonal (short note or null). If no recipes found return []. Return ONLY a raw JSON array.\n\nText:\n${chunk}` }],
+        'You are a recipe extraction assistant. Return only a raw valid JSON array. No markdown, no backticks.',
+        3000
+      )
+      let cleaned = raw.trim()
+      const s = cleaned.indexOf('['), e = cleaned.lastIndexOf(']')
+      if (s !== -1 && e !== -1) cleaned = cleaned.slice(s, e + 1)
+      const found = JSON.parse(cleaned)
+      if (Array.isArray(found)) allRecipes = [...allRecipes, ...found]
+    } catch (e) {
+      console.warn('Chunk extraction failed:', e.message)
+    }
+  }
+  return allRecipes
 }

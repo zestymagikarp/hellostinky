@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, getMyHousehold, getRecipes, getWeeklyMenu, saveWeeklyMenu, getMyPicks, savePicks, getAllPicks, getHouseholdMembers, saveRecipe, deleteRecipe, saveRating, archiveWeek, getNextWeekMenu, saveNextWeekMenu, getMyNextWeekPicks, saveNextWeekPicks, getAllNextWeekPicks, getMealNotes, getPantry } from '../lib/supabase'
-import { generateWeeklyMenu, generateGroceryList, extractRecipesFromPDF } from '../lib/ai'
+import { generateWeeklyMenu, generateGroceryList, extractRecipesFromText, extractRecipesFromImages } from '../lib/ai'
+import { extractTextFromPDF, extractImagesFromPDF, isScannedPDF } from '../lib/pdfExtract'
 import { useScheduler, requestNotificationPermission } from '../lib/scheduler'
 import MealCard from '../components/MealCard'
 import RecipeDrawer from '../components/RecipeDrawer'
@@ -305,59 +306,45 @@ export default function MainApp({ user }) {
   }
 
   // Recipes tab
-  // Split a base64 PDF into chunks by re-reading as array buffer and slicing bytes
-  async function readFileAsB64(file) {
-    return new Promise((res, rej) => {
-      const fr = new FileReader()
-      fr.onload = () => res(fr.result.split(',')[1])
-      fr.onerror = rej
-      fr.readAsDataURL(file)
-    })
-  }
-
-  async function splitAndUploadPDF(file, itemKey) {
-    // Chunk size: 8MB of raw file bytes = ~10.5MB base64, well under Vercel limit
-    const CHUNK_BYTES = 8 * 1024 * 1024
-    const chunks = Math.ceil(file.size / CHUNK_BYTES)
-    let allRecipes = []
-
-    for (let i = 0; i < chunks; i++) {
-      const start = i * CHUNK_BYTES
-      const end = Math.min(start + CHUNK_BYTES, file.size)
-      const chunk = file.slice(start, end)
-      const chunkFile = new File([chunk], file.name, { type: 'application/pdf' })
-
-      setUploadItems(prev => prev.map(it => it.key === itemKey
-        ? { ...it, msg: chunks > 1 ? `Processing part ${i + 1} of ${chunks}...` : 'Extracting recipes with AI...' }
-        : it))
-
-      const b64 = await readFileAsB64(chunkFile)
-      try {
-        const extracted = await extractRecipesFromPDF(b64)
-        const arr = Array.isArray(extracted) ? extracted : [extracted]
-        allRecipes = [...allRecipes, ...arr]
-      } catch (e) {
-        // If a chunk fails, log but continue with other chunks
-        console.warn(`Chunk ${i + 1} failed:`, e.message)
-      }
-    }
-    return allRecipes
-  }
-
   async function handleFiles(files) {
     for (const file of Array.from(files)) {
       if (file.type !== 'application/pdf') continue
       const itemKey = Date.now() + file.name
       setUploadItems(prev => [...prev, { key: itemKey, name: file.name, status: 'loading', msg: 'Reading PDF...' }])
       try {
-        const arr = await splitAndUploadPDF(file, itemKey)
-        if (arr.length === 0) throw new Error('No recipes found in this PDF. Make sure it contains actual recipe content.')
+        // Auto-detect: is this a text PDF or a scanned image PDF?
+        setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: 'Detecting PDF type...' } : it))
+        const scanned = await isScannedPDF(file)
+        let arr = []
+
+        if (!scanned) {
+          // ── Text-based PDF: extract text and send to AI ──────────────
+          setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: 'Extracting text from PDF...' } : it))
+          const text = await extractTextFromPDF(file)
+          setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: `Scanning ${Math.round(text.length / 1000)}k characters for recipes...` } : it))
+          arr = await extractRecipesFromText(text)
+        } else {
+          // ── Scanned PDF: render pages as images, send to vision AI ───
+          setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: 'Scanned PDF detected — rendering pages...' } : it))
+          const pages = await extractImagesFromPDF(file, (done, total) => {
+            setUploadItems(prev => prev.map(it => it.key === itemKey
+              ? { ...it, msg: `Rendering page ${done} of ${total}...` } : it))
+          })
+          setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: `Reading ${pages.length} pages with AI vision...` } : it))
+          arr = await extractRecipesFromImages(pages, (done, total) => {
+            setUploadItems(prev => prev.map(it => it.key === itemKey
+              ? { ...it, msg: `Reading pages ${done} of ${total} with AI...` } : it))
+          })
+        }
+
+        if (arr.length === 0) throw new Error('No recipes found. Make sure the PDF contains recipe content.')
         setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: `Saving ${arr.length} recipes...` } : it))
         for (const r of arr) {
           const saved = await saveRecipe({ ...r, emoji: rndEmoji() }, household.id)
           setRecipes(prev => [saved, ...prev])
         }
-        setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, status: 'done', count: arr.length, names: arr.map(r => r.name) } : it))
+        setUploadItems(prev => prev.map(it => it.key === itemKey
+          ? { ...it, status: 'done', count: arr.length, names: arr.map(r => r.name) } : it))
       } catch (err) {
         setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, status: 'err', msg: err.message } : it))
       }
