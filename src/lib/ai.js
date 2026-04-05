@@ -55,17 +55,19 @@ export async function generateWeeklyMenu(recipes, preferences = {}) {
 }
 
 // ── Grocery list ─────────────────────────────────────────────
-export async function generateGroceryList(meals) {
+export async function generateGroceryList(meals, householdSize = 2) {
   const details = meals.map(r => {
     let ings = r.ingredients || []
     if (typeof ings === 'string') { try { ings = JSON.parse(ings) } catch { ings = [] } }
     if (!Array.isArray(ings)) ings = []
-    return `${r.name}: ${ings.map(i => `${i.item} ${i.amount}`).join(', ')}`
-  }).join('\n')
+    const recipeServings = r.servings || 4
+    return `${r.name} (recipe makes ${recipeServings} servings, cooking for ${householdSize}):\n${ings.map(i => `  - ${i.item}: ${i.amount}`).join('\n')}`
+  }).join('\n\n')
 
   const raw = await callClaude(
-    [{ role: 'user', content: `Selected meals:\n${details}\n\nCreate an optimized grocery list. Rules:\n1. Combine duplicate ingredients across recipes and sum their amounts\n2. Convert all amounts to practical grocery store units that a shopper would actually buy — never use grams or millilitres in the final output. Use these conversions:\n   - Meat/fish: "X lb" or "X oz" or count (e.g. "2 chicken breasts", "1 lb ground beef", "4 salmon fillets")\n   - Produce: count or bunch (e.g. "2 avocados", "1 bunch cilantro", "3 cloves garlic")\n   - Canned/jarred: "1 can (15oz)", "1 jar (12oz)"\n   - Dairy: "1 cup", "8 oz", "1 block", "1 bag (8oz shredded)"\n   - Liquids/sauces: "1 bottle", "1 cup", or practical size\n   - Spices/seasonings: "to taste" or "1 tsp" if small, "1 bottle" if stocking up\n   - Bread/buns: count (e.g. "4 brioche buns", "1 loaf")\n3. Mark shared:true if the ingredient appears in 2 or more recipes\n4. Return ONLY valid JSON: [{"name":"item","amount":"store-friendly qty","category":"Produce|Meat & Seafood|Dairy|Pantry|Bakery|Frozen|Other","shared":true/false}]` }],
-    'You are a grocery list expert who converts recipe quantities into practical store-friendly amounts. Return only a JSON array. No markdown.'
+    [{ role: 'user', content: `I am cooking for ${householdSize} people. Here are the selected meals with their ingredients:\n\n${details}\n\nCreate an optimized grocery list. Rules:\n1. Each recipe shows how many servings it makes. Scale ingredient amounts to feed ${householdSize} people (e.g. if a recipe makes 4 servings and you're feeding 2, use half the amounts).\n2. After scaling, combine the same ingredient across multiple recipes by adding the scaled amounts together. For example if recipe A needs 0.75 avocado and recipe B needs 0.5 avocado after scaling, that's 1.25 avocados total → round up to 2 avocados.\n3. Convert all final amounts to practical grocery store units — never use grams or millilitres:\n   - Meat/fish: count or lbs (e.g. "2 chicken breasts", "1 lb ground beef")\n   - Produce: count or bunch — always round UP to whole units (e.g. 1.25 avocados → 2 avocados)\n   - Canned/jarred: "1 can (15oz)", round up to whole cans\n   - Dairy: practical size (e.g. "1 cup Greek yogurt", "8oz shredded cheddar")\n   - Liquids/sauces: "1 bottle" or "1 cup"\n   - Spices used in small amounts: "to taste"\n   - Bread/buns: whole count\n4. Mark shared:true if the ingredient is used in 2 or more recipes\n5. Return ONLY valid JSON: [{"name":"item","amount":"store-friendly qty","category":"Produce|Meat & Seafood|Dairy|Pantry|Bakery|Frozen|Other","shared":true/false}]` }],
+    'You are a grocery list expert. Scale recipe amounts to the household size, combine shared ingredients correctly, and output practical store-friendly quantities. Return only a JSON array. No markdown.',
+    2000
   )
   return parseJSON(raw)
 }

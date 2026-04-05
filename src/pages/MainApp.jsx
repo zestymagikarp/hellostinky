@@ -340,7 +340,7 @@ export default function MainApp({ user }) {
     if (!sel.length) { alert('No meals selected by anyone yet!'); return }
     setGroceryLoading(true)
     try {
-      const items = await generateGroceryList(sel)
+      const items = await generateGroceryList(sel, members.length || 2)
       const pantryNames = new Set(pantryItems.map(p => p.name.toLowerCase()))
       setGroceryItems(items.map((it, i) => ({
         ...it, id: i,
@@ -361,7 +361,7 @@ export default function MainApp({ user }) {
     if (!sel.length) { alert('No meals in your next week box yet!'); return }
     setGroceryLoading(true)
     try {
-      const items = await generateGroceryList(sel)
+      const items = await generateGroceryList(sel, members.length || 2)
       const pantryNames = new Set(pantryItems.map(p => p.name.toLowerCase()))
       setGroceryItems(items.map((it, i) => ({
         ...it, id: i,
