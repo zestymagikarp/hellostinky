@@ -5,6 +5,12 @@ import MealNoteEditor from './MealNoteEditor'
 const BADGE_LABELS = { calorie: 'Calorie Smart', quick: '20-Min Meal', gourmet: 'Gourmet', taste: 'Taste Tours' }
 const BADGE_CSS = { calorie: 'badge-calorie', quick: 'badge-quick', gourmet: 'badge-gourmet', taste: 'badge-taste' }
 
+function safeIngredients(recipe) {
+  let ings = recipe?.ingredients || []
+  if (typeof ings === 'string') { try { ings = JSON.parse(ings) } catch { ings = [] } }
+  return Array.isArray(ings) ? ings : []
+}
+
 export default function RecipeDrawer({ recipe, onClose, householdId, userId, mealNotes = {}, onNoteUpdate }) {
   const [drawerError, setDrawerError] = useState(false)
   const [servings, setServings] = useState(recipe?.servings || 4)
@@ -208,10 +214,10 @@ export default function RecipeDrawer({ recipe, onClose, householdId, userId, mea
                 )}
                 {scale !== 1 && ' (scaled)'}
               </div>
-              {(recipe.ingredients || []).length === 0 ? (
+              {safeIngredients(recipe).length === 0 ? (
                 <div style={{ color: '#888', fontSize: 13 }}>No ingredients listed.</div>
               ) : (
-                (recipe.ingredients || []).map((ing, i) => (
+                safeIngredients(recipe).map((ing, i) => (
                   <div key={i} style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     padding: '10px 0', borderBottom: '0.5px solid rgba(0,0,0,0.06)',

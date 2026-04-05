@@ -35,7 +35,7 @@ export async function generateWeeklyMenu(recipes, preferences = {}) {
 
   if (recipes.length > 0) {
     const pool = recipes.map(r =>
-      `ID:${r.id}|${r.name}|ingredients:${(r.ingredients || []).map(i => i.item).join(',')}`
+      `ID:${r.id}|${r.name}|ingredients:${(()=>{ let ings=r.ingredients||[]; if(typeof ings==='string'){try{ings=JSON.parse(ings)}catch{ings=[]}}; return Array.isArray(ings)?ings:[] })().map(i => i.item).join(',')}`
     ).join('\n')
     prompt = `It is ${month}. I have these recipes:\n${pool}\n\nSelect 12-15 recipes for this week's menu. Prioritize: (1) seasonal ingredients for ${month}, (2) maximum ingredient overlap to minimize grocery waste${prefStr ? ', (3) household preferences: ' + prefStr : ''}. For each recipe, add/update "seasonal" (short note or null) and estimate "calories" per serving if missing. Return ONLY a JSON array using the original recipe IDs plus updated fields. Keep all original recipe data.`
     system = 'You are a seasonal meal planning optimizer. Return only a valid JSON array. No markdown, no explanation.'
@@ -49,9 +49,13 @@ export async function generateWeeklyMenu(recipes, preferences = {}) {
 }
 
 export async function generateGroceryList(meals) {
-  const details = meals.map(r =>
-    `${r.name}: ${(r.ingredients || []).map(i => `${i.item} ${i.amount}`).join(', ')}`
-  ).join('\n')
+  const details = meals.map(r => {
+    // ingredients may be a JSON string (from DB) or an array
+    let ings = r.ingredients || []
+    if (typeof ings === 'string') { try { ings = JSON.parse(ings) } catch { ings = [] } }
+    if (!Array.isArray(ings)) ings = []
+    return `${r.name}: ${ings.map(i => `${i.item} ${i.amount}`).join(', ')}`
+  }).join('\n')
 
   const raw = await callClaude(
     [{ role: 'user', content: `Selected meals:\n${details}\n\nCreate an optimized grocery list. Combine duplicates, scale amounts. Return ONLY valid JSON: [{"name":"item","amount":"combined qty","category":"Produce|Meat & Seafood|Dairy|Pantry|Bakery|Frozen|Other","shared":true/false}]` }],
