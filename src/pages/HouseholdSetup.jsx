@@ -44,7 +44,7 @@ export default function HouseholdSetup({ user, onDone }) {
           <p style={{ fontSize: 12, color: '#888', marginBottom: 20, textAlign: 'center' }}>
             They'll enter this code when they create their account
           </p>
-          <button className="btn btn-green btn-full" onClick={onDone}>Get started →</button>
+          <button className="btn btn-green btn-full" onClick={() => window.location.reload()}>Get started →</button>
         </div>
       </div>
     )
