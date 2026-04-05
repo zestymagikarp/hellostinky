@@ -50,15 +50,18 @@ export default function RecipeDrawer({ recipe, onClose, householdId, userId, mea
     }
   }, [recipe?.id])
 
-  // If the recipe has no ingredients, fetch them from AI on open
+  // Only fetch AI-generated details if this is NOT a saved PDF recipe
+  // A saved recipe always has ingredients; only pure AI menu meals need this fallback
   useEffect(() => {
     if (!recipe) return
     const ings = safeIngredients(recipe)
-    if (ings.length === 0 && !recipeDetails && !loadingDetails) {
+    // recipe.household_id means it came from the saved recipes DB — never overwrite it
+    const isSavedRecipe = !!recipe.household_id || !!recipe.created_at
+    if (ings.length === 0 && !isSavedRecipe && !recipeDetails && !loadingDetails) {
       setLoadingDetails(true)
       fetchRecipeDetails(recipe)
         .then(details => setRecipeDetails(details))
-        .catch(() => {}) // silent fail, show "no ingredients" message
+        .catch(() => {})
         .finally(() => setLoadingDetails(false))
     }
   }, [recipe?.id])

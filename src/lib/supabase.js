@@ -84,9 +84,18 @@ export async function getRecipes(householdId) {
 }
 
 export async function saveRecipe(recipe, householdId) {
+  // Normalise ingredients and instructions to arrays before saving
+  let ingredients = recipe.ingredients || []
+  if (typeof ingredients === 'string') { try { ingredients = JSON.parse(ingredients) } catch { ingredients = [] } }
+  if (!Array.isArray(ingredients)) ingredients = []
+
+  let instructions = recipe.instructions || []
+  if (typeof instructions === 'string') { try { instructions = JSON.parse(instructions) } catch { instructions = [] } }
+  if (!Array.isArray(instructions)) instructions = []
+
   const { data, error } = await supabase
     .from('recipes')
-    .insert({ ...recipe, household_id: householdId })
+    .insert({ ...recipe, ingredients, instructions, household_id: householdId })
     .select().single()
   if (error) throw error
   return data

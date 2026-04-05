@@ -1,28 +1,33 @@
-export async function callClaude(messages, system, maxTokens = 2000) {
+const API_URL = 'https://api.anthropic.com/v1/messages'
+
+async function callClaude(messages, system = '', maxTokens = 1000) {
   const res = await fetch('/api/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: maxTokens,
-      system,
-      messages,
-    }),
+    body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: maxTokens, system, messages })
   })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(err)
+  }
   const data = await res.json()
-  if (data.error) throw new Error(data.error.message)
-  return data.content?.map(b => b.text || '').join('') || ''
+  return data.content.map(b => b.text || '').join('')
 }
 
-export function parseJSON(raw) {
-  let cleaned = raw.replace(/```json|```/g, '').trim()
-  // Find the outermost [ ... ] array
-  const start = cleaned.indexOf('[')
-  const end = cleaned.lastIndexOf(']')
-  if (start !== -1 && end !== -1) cleaned = cleaned.slice(start, end + 1)
-  return JSON.parse(cleaned)
+function parseJSON(raw) {
+  let cleaned = raw.trim()
+  // Strip markdown code fences if present
+  cleaned = cleaned.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim()
+  const s = cleaned.indexOf('['), e = cleaned.lastIndexOf(']')
+  if (s !== -1 && e !== -1) return JSON.parse(cleaned.slice(s, e + 1))
+  const s2 = cleaned.indexOf('{'), e2 = cleaned.lastIndexOf('}')
+  if (s2 !== -1 && e2 !== -1) return JSON.parse(cleaned.slice(s2, e2 + 1))
+  throw new Error('No JSON found in response')
 }
 
+// ── Weekly menu ──────────────────────────────────────────────
+// AI's ONLY job here: select which saved recipes to show + add seasonal notes.
+// All real recipe data (ingredients, instructions) comes from the saved recipes DB.
 export async function generateWeeklyMenu(recipes, preferences = {}) {
   const month = new Date().toLocaleString('en-US', { month: 'long' })
   const prefStr = [
@@ -31,26 +36,27 @@ export async function generateWeeklyMenu(recipes, preferences = {}) {
     preferences.cuisine_likes?.length ? `Preferred cuisines: ${preferences.cuisine_likes.join(', ')}` : '',
     preferences.cuisine_dislikes?.length ? `Avoid these cuisines: ${preferences.cuisine_dislikes.join(', ')}` : '',
   ].filter(Boolean).join('. ')
+
   let prompt, system
 
   if (recipes.length > 0) {
-    const pool = recipes.map(r =>
-      `ID:${r.id}|${r.name}|ingredients:${(()=>{ let ings=r.ingredients||[]; if(typeof ings==='string'){try{ings=JSON.parse(ings)}catch{ings=[]}}; return Array.isArray(ings)?ings:[] })().map(i => i.item).join(',')}`
-    ).join('\n')
-    prompt = `It is ${month}. I have these recipes:\n${pool}\n\nSelect 12-15 recipes for this week's menu. Prioritize: (1) seasonal ingredients for ${month}, (2) maximum ingredient overlap to minimize grocery waste${prefStr ? ', (3) household preferences: ' + prefStr : ''}. For each recipe, add/update "seasonal" (short note or null) and estimate "calories" per serving if missing. Return ONLY a JSON array using the original recipe IDs plus updated fields. Keep all original recipe data.`
-    system = 'You are a seasonal meal planning optimizer. Return only a valid JSON array. No markdown, no explanation.'
+    // Just pass names + IDs — don't need to send full ingredient lists
+    const pool = recipes.map(r => `ID:${r.id}|${r.name}`).join('\n')
+    prompt = `It is ${month}. I have these saved recipes:\n${pool}\n\nSelect 12-15 recipes for this week's menu. Prioritize: (1) variety, (2) seasonal relevance for ${month}${prefStr ? ', (3) household preferences: ' + prefStr : ''}.\n\nReturn ONLY a JSON array. Each object must have:\n- id: the original recipe ID (copy exactly as shown)\n- seasonal: a short seasonal note string or null\n\nDo NOT change any other fields. Return ONLY the JSON array.`
+    system = 'You are a meal planning assistant. Return only a valid JSON array of {id, seasonal} objects. No other fields. No markdown.'
   } else {
-    prompt = `It is ${month}. Generate 12 diverse seasonal meal recipes with maximum ingredient overlap to minimize grocery shopping.${prefStr ? ' Household preferences: ' + prefStr + '.' : ''} Return a JSON array where each object has exactly these fields: name (string), subtitle (string), time (integer minutes), servings (integer, use 4), calories (integer per serving), price (float 9-12), badge (calorie or quick or gourmet or taste or empty string), tags (array of strings), ingredients (array of objects with item and amount fields), seasonal (string or null). Include 2 vegetarian options. Return ONLY the JSON array, nothing else.`
-    system = 'You are a seasonal recipe generator. Return only a valid JSON array. No markdown, no explanation.'
+    // No saved recipes — generate from scratch (new user)
+    prompt = `It is ${month}. Generate 12 diverse seasonal meal recipes.${prefStr ? ' Household preferences: ' + prefStr + '.' : ''} Return a JSON array where each object has: name, subtitle, time (int minutes), servings (int, default 4), calories (int per serving), price (float 9-12), badge (calorie|quick|gourmet|taste or empty string), tags (array), ingredients (array of {item, amount}), instructions (array of step strings — the actual cooking steps), seasonal (string or null). Include 2 vegetarian options. Return ONLY the JSON array.`
+    system = 'You are a seasonal recipe generator. Return only a valid JSON array. No markdown.'
   }
 
-  const raw = await callClaude([{ role: 'user', content: prompt }], system, 6000)
+  const raw = await callClaude([{ role: 'user', content: prompt }], system, 4000)
   return parseJSON(raw)
 }
 
+// ── Grocery list ─────────────────────────────────────────────
 export async function generateGroceryList(meals) {
   const details = meals.map(r => {
-    // ingredients may be a JSON string (from DB) or an array
     let ings = r.ingredients || []
     if (typeof ings === 'string') { try { ings = JSON.parse(ings) } catch { ings = [] } }
     if (!Array.isArray(ings)) ings = []
@@ -64,28 +70,67 @@ export async function generateGroceryList(meals) {
   return parseJSON(raw)
 }
 
-export async function extractRecipesFromPDF(base64Data) {
-  const raw = await callClaude(
-    [{
-      role: 'user',
-      content: [
-        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } },
-        { type: 'text', text: 'Find EVERY recipe in this document and extract them all without skipping any. For each recipe return a JSON object with: name, subtitle (one-line description), time (int, total minutes), servings (int, default 4), calories (int per serving, estimate if needed), price (float, estimated USD per serving 8-14), badge (calorie|quick|gourmet|taste or empty string), tags (array from: chicken,beef,pork,fish,vegetarian,vegan,pasta,healthy,quick,family,spicy), ingredients (array of {item, amount}), seasonal (short note or null). Return ONLY a raw JSON array starting with [ and ending with ] — no markdown, no backticks, no explanation whatsoever.' }
-      ]
-    }],
-    'You are a recipe extraction assistant. Return only a raw valid JSON array of all recipes found. No markdown, no backticks, no text outside the JSON array itself.',
-    4000
-  )
-  // Robustly extract the JSON array even if there is stray text
-  let cleaned = raw.trim()
-  const startIdx = cleaned.indexOf('[')
-  const endIdx = cleaned.lastIndexOf(']')
-  if (startIdx !== -1 && endIdx !== -1) cleaned = cleaned.slice(startIdx, endIdx + 1)
-  return JSON.parse(cleaned)
+// ── PDF extraction (text-based PDFs) ────────────────────────
+// Extracts ingredients AND instructions directly from PDF text.
+// AI must not invent anything — only extract what is literally in the text.
+export async function extractRecipesFromText(text, onProgress) {
+  const CHUNK_SIZE = 4000
+  const chunks = []
+
+  const recipeKeywords = ['ingredients', 'instructions', 'calories', 'protein', 'carbs', 'per serving', 'per sandwich', 'per burger']
+  const lines = text.split('\n')
+  let buffer = ''
+  let inRecipe = false
+
+  for (const line of lines) {
+    const lower = line.toLowerCase()
+    if (recipeKeywords.some(k => lower.includes(k))) inRecipe = true
+    if (inRecipe) {
+      buffer += line + '\n'
+      if (buffer.length >= CHUNK_SIZE) {
+        chunks.push(buffer)
+        buffer = ''
+      }
+    }
+  }
+  if (buffer.trim().length > 100) chunks.push(buffer)
+  if (chunks.length === 0) {
+    for (let i = 0; i < text.length; i += CHUNK_SIZE) chunks.push(text.slice(i, i + CHUNK_SIZE))
+  }
+
+  let allRecipes = []
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const chunk = chunks[ci]
+    if (chunk.trim().length < 100) { onProgress && onProgress(ci + 1, chunks.length); continue }
+    onProgress && onProgress(ci + 1, chunks.length)
+    try {
+      const raw = await callClaude(
+        [{ role: 'user', content: `Extract all complete recipes from this text. IMPORTANT: only extract information that is literally present in the text — do NOT invent or guess any ingredients or instructions. If a field is not in the text, omit it or use null.\n\nFor each recipe return a JSON object with:\n- name: recipe name as written\n- subtitle: one-line description if present, else null\n- time: total minutes if stated, else null\n- servings: number of servings if stated, else 4\n- calories: calories per serving if stated (look for "X Calories" or "per serving"), else null\n- price: estimated USD per serving (8-14), or null\n- badge: one of calorie|quick|gourmet|taste if clearly applicable, else empty string\n- tags: array from [chicken,beef,pork,fish,vegetarian,vegan,pasta,healthy,quick,family,spicy] based on ingredients present\n- ingredients: array of {item, amount} — ONLY ingredients explicitly listed in the text\n- instructions: array of step strings — ONLY steps explicitly written in the text. Copy them faithfully.\n- seasonal: null\n\nIf no complete recipes found, return []. Return ONLY a raw JSON array.\n\nText:\n${chunk}` }],
+        'You are a recipe extraction assistant. Extract ONLY what is in the text. Never invent ingredients or instructions. Return only a raw valid JSON array.',
+        3000
+      )
+      let cleaned = raw.trim()
+      const s = cleaned.indexOf('['), e = cleaned.lastIndexOf(']')
+      if (s !== -1 && e !== -1) cleaned = cleaned.slice(s, e + 1)
+      const found = JSON.parse(cleaned)
+      if (Array.isArray(found)) allRecipes = [...allRecipes, ...found]
+    } catch (e) {
+      console.warn('Chunk extraction failed:', e.message)
+    }
+  }
+
+  // Deduplicate by name
+  const seen = new Set()
+  return allRecipes.filter(r => {
+    if (!r.name || seen.has(r.name.toLowerCase())) return false
+    seen.add(r.name.toLowerCase())
+    return true
+  })
 }
 
+// ── PDF extraction (scanned image PDFs) ─────────────────────
+// Same principle: extract only what's visible on the page.
 export async function extractRecipesFromImages(pages, onProgress) {
-  // Send 1 page at a time for scanned PDFs — keeps payload small and reliable
   const BATCH = 1
   let allRecipes = []
 
@@ -106,11 +151,11 @@ export async function extractRecipesFromImages(pages, onProgress) {
             ...imageContent,
             {
               type: 'text',
-              text: `This is page ${i + 1} of ${pages[0].totalPages} from a recipe book or cookbook. Extract any complete or partial recipes visible. For each recipe return a JSON object with: name, subtitle (one-line description), time (int, total minutes), servings (int, default 4), calories (int per serving, estimate if needed), price (float, estimated USD per serving 8-14), badge (calorie|quick|gourmet|taste or empty string), tags (array from: chicken,beef,pork,fish,vegetarian,vegan,pasta,healthy,quick,family,spicy), ingredients (array of {item, amount}), seasonal (short note or null). If no recipe content is visible return []. Return ONLY a raw JSON array.`
+              text: `This is page ${i + 1} of ${pages[0].totalPages} from a recipe book. Extract any complete or partial recipes visible on this page.\n\nIMPORTANT: only extract what you can actually read on this page — do NOT invent or guess any ingredients or instructions.\n\nFor each recipe return a JSON object with:\n- name: recipe name as printed\n- subtitle: one-line description if visible, else null\n- time: total minutes if stated, else null\n- servings: servings if stated, else 4\n- calories: calories per serving if stated (look for calorie counts in boxes/headers), else null\n- price: null\n- badge: empty string\n- tags: array from [chicken,beef,pork,fish,vegetarian,vegan,pasta,healthy,quick,family,spicy]\n- ingredients: array of {item, amount} — ONLY what is printed on this page\n- instructions: array of step strings — ONLY steps printed on this page, copied faithfully\n- seasonal: null\n\nIf no recipe content is visible return []. Return ONLY a raw JSON array.`
             }
           ]
         }],
-        'You are a recipe extraction assistant reading scanned cookbook pages. Return only a raw valid JSON array. No markdown, no backticks.',
+        'You are a recipe extraction assistant reading cookbook pages. Extract ONLY what is printed. Never invent ingredients or instructions. Return only a raw valid JSON array.',
         3000
       )
       let cleaned = raw.trim()
@@ -119,30 +164,60 @@ export async function extractRecipesFromImages(pages, onProgress) {
       const found = JSON.parse(cleaned)
       if (Array.isArray(found)) allRecipes = [...allRecipes, ...found]
     } catch (err) {
-      console.warn(`Batch ${i}–${i + BATCH} failed:`, err.message)
+      console.warn(`Page ${i + 1} failed:`, err.message)
     }
   }
   return allRecipes
 }
 
+// ── Instructions for recipe drawer ──────────────────────────
+// Uses the stored instructions if available, only generates if truly missing.
 export async function generateRecipeInstructions(recipe) {
-  const ingredients = (recipe.ingredients || []).map(i => `${i.item}: ${i.amount}`).join('\n')
+  // If the recipe has stored instructions, format and return them directly
+  let stored = recipe.instructions
+  if (typeof stored === 'string') { try { stored = JSON.parse(stored) } catch { stored = null } }
+
+  if (Array.isArray(stored) && stored.length > 0) {
+    // Convert stored instruction steps to the drawer's expected format
+    return {
+      steps: stored.map((step, i) => {
+        if (typeof step === 'string') {
+          return { number: i + 1, title: `Step ${i + 1}`, instruction: step, duration: null }
+        }
+        return { number: i + 1, title: step.title || `Step ${i + 1}`, instruction: step.instruction || step.text || String(step), duration: step.duration || null }
+      }),
+      tips: [],
+      storage: null
+    }
+  }
+
+  // Only reach here if no stored instructions — generate from ingredients as a last resort
+  let ings = recipe.ingredients || []
+  if (typeof ings === 'string') { try { ings = JSON.parse(ings) } catch { ings = [] } }
+  if (!Array.isArray(ings)) ings = []
+
+  if (ings.length === 0) throw new Error('No ingredients available to generate instructions.')
+
+  const ingStr = ings.map(i => `${i.item}: ${i.amount}`).join('\n')
   const raw = await callClaude(
-    [{ role: 'user', content: `Recipe: ${recipe.name}\nSubtitle: ${recipe.subtitle || ''}\nIngredients:\n${ingredients}\n\nGenerate clear step-by-step cooking instructions for this recipe. Return ONLY a JSON object with this exact shape: {"steps": [{"number": 1, "title": "Short title", "instruction": "Full instruction text", "duration": "5 mins"}], "tips": ["tip1", "tip2"], "storage": "How to store leftovers"}` }],
-    'You are a professional chef writing clear home cooking instructions. Return only a valid JSON object. No markdown, no backticks.',
+    [{ role: 'user', content: `Recipe: ${recipe.name}\nSubtitle: ${recipe.subtitle || ''}\nIngredients:\n${ingStr}\n\nGenerate clear step-by-step cooking instructions. Return ONLY a JSON object: {"steps": [{"number": 1, "title": "Short title", "instruction": "Full step", "duration": "5 mins"}], "tips": ["tip1"], "storage": "storage note"}` }],
+    'You are a professional chef. Return only valid JSON. No markdown.',
     2000
   )
   let cleaned = raw.trim()
-  const start = cleaned.indexOf('{')
-  const end = cleaned.lastIndexOf('}')
-  if (start !== -1 && end !== -1) cleaned = cleaned.slice(start, end + 1)
+  const s = cleaned.indexOf('{'), e = cleaned.lastIndexOf('}')
+  if (s !== -1 && e !== -1) cleaned = cleaned.slice(s, e + 1)
   return JSON.parse(cleaned)
 }
 
+// ── Protein swaps ────────────────────────────────────────────
 export async function suggestProteinSwaps(recipe) {
-  const ingredients = (recipe.ingredients || []).map(i => `${i.item}: ${i.amount}`).join('\n')
+  let ings = recipe.ingredients || []
+  if (typeof ings === 'string') { try { ings = JSON.parse(ings) } catch { ings = [] } }
+  if (!Array.isArray(ings)) ings = []
+  const ingStr = ings.map(i => `${i.item}: ${i.amount}`).join('\n')
   const raw = await callClaude(
-    [{ role: 'user', content: `Recipe: ${recipe.name}\nIngredients:\n${ingredients}\n\nIdentify the main protein(s) in this recipe and suggest 3-4 alternative proteins that would work well as substitutes. For each alternative, calculate the approximate calorie difference per serving compared to the original (positive means more calories, negative means fewer). Return ONLY a JSON object: {"original_protein": "ground beef", "alternatives": [{"name": "ground turkey", "calories_diff": -45, "notes": "leaner, milder flavour"}, ...]}. If no clear protein found return {"original_protein": null, "alternatives": []}` }],
+    [{ role: 'user', content: `Recipe: ${recipe.name}\nIngredients:\n${ingStr}\n\nIdentify the main protein and suggest 3-4 alternatives. Return ONLY a JSON object: {"original_protein": "chicken breast", "alternatives": [{"name": "turkey breast", "calories_diff": -20, "notes": "leaner, similar texture"}]}. If no clear protein return {"original_protein": null, "alternatives": []}` }],
     'You are a nutrition expert. Return only valid JSON. No markdown.',
     800
   )
@@ -152,150 +227,34 @@ export async function suggestProteinSwaps(recipe) {
   return JSON.parse(cleaned)
 }
 
-export async function extractRecipesFromText(text, onProgress) {
-  // Split text by recipe boundaries — look for page markers or recipe titles
-  // This is much more efficient than fixed-size chunks
-  const CHUNK_SIZE = 4000
-  const chunks = []
-
-  // Skip obvious non-recipe content (table of contents, intro pages)
-  const recipeKeywords = ['ingredients', 'instructions', 'calories', 'protein', 'carbs', 'per serving', 'per sandwich', 'per burger']
-  const lines = text.split('\n')
-  let buffer = ''
-  let inRecipe = false
-
-  for (const line of lines) {
-    const lower = line.toLowerCase()
-    if (recipeKeywords.some(k => lower.includes(k))) inRecipe = true
-    if (inRecipe) {
-      buffer += line + '\n'
-      if (buffer.length >= CHUNK_SIZE) {
-        chunks.push(buffer)
-        buffer = ''
-      }
-    }
-  }
-  if (buffer.trim().length > 100) chunks.push(buffer)
-
-  // Fallback: if no recipe keywords found, just chunk everything
-  if (chunks.length === 0) {
-    for (let i = 0; i < text.length; i += CHUNK_SIZE) {
-      chunks.push(text.slice(i, i + CHUNK_SIZE))
-    }
-  }
-
-  let allRecipes = []
-  for (let ci = 0; ci < chunks.length; ci++) {
-    const chunk = chunks[ci]
-    if (chunk.trim().length < 100) { onProgress && onProgress(ci + 1, chunks.length); continue }
-    onProgress && onProgress(ci + 1, chunks.length)
-    try {
-      const raw = await callClaude(
-        [{ role: 'user', content: `Extract all complete recipes from this text. Only extract recipes that have both ingredients AND instructions. For each recipe return a JSON object with: name, subtitle (one-line description), time (int, total minutes), servings (int, default 4), calories (int per serving — use the value stated if present), price (float, estimated USD per serving 8-14), badge (calorie|quick|gourmet|taste or empty string), tags (array from: chicken,beef,pork,fish,vegetarian,vegan,pasta,healthy,quick,family,spicy), ingredients (array of {item, amount}), seasonal (short note or null). If no complete recipes found return []. Return ONLY a raw JSON array.\n\nText:\n${chunk}` }],
-        'You are a recipe extraction assistant. Return only a raw valid JSON array. No markdown, no backticks.',
-        2000
-      )
-      let cleaned = raw.trim()
-      const s = cleaned.indexOf('['), e = cleaned.lastIndexOf(']')
-      if (s !== -1 && e !== -1) cleaned = cleaned.slice(s, e + 1)
-      const found = JSON.parse(cleaned)
-      if (Array.isArray(found)) allRecipes = [...allRecipes, ...found]
-    } catch (e) {
-      console.warn('Chunk extraction failed:', e.message)
-    }
-  }
-
-  // Deduplicate by recipe name
-  const seen = new Set()
-  return allRecipes.filter(r => {
-    if (!r.name || seen.has(r.name.toLowerCase())) return false
-    seen.add(r.name.toLowerCase())
-    return true
-  })
-}
-
 // ── HomeChef nutrition fetcher ────────────────────────────────
-// Extracts real nutrition data from a HomeChef recipe page URL
 export async function fetchHomeChefNutrition(url) {
   try {
-    // Normalize URL — both /32130 and /meals/slug formats work
     let fetchUrl = url.trim()
     if (!fetchUrl.startsWith('http')) fetchUrl = 'https://' + fetchUrl
     fetchUrl = fetchUrl.replace('www.homechef.com', 'homechef.com')
     if (!fetchUrl.includes('homechef.com')) return null
-
-    // Fetch via our server-side proxy to avoid CORS
     const res = await fetch(`/api/fetch-url?url=${encodeURIComponent(fetchUrl)}`)
     if (!res.ok) return null
     const html = await res.text()
-
-    // Parse nutrition from HTML
     const nutrition = {}
-
-    // Calories
-    const calMatch = html.match(/Calories[^<]*<[^>]*>\s*<strong>([\d,]+)<\/strong>/i)
-      || html.match(/Calories[\s\S]{0,50}?<strong>([\d,]+)<\/strong>/i)
-      || html.match(/"calories"[^>]*>([\d,]+)/i)
+    const calMatch = html.match(/Calories[^<]*<[^>]*>\s*<strong>([\d,]+)<\/strong>/i) || html.match(/"calories"[^>]*>([\d,]+)/i)
     if (calMatch) nutrition.calories = parseInt(calMatch[1].replace(',', ''))
-
-    // Protein
-    const protMatch = html.match(/Protein[\s\S]{0,80}?<strong>([\d.]+)g?<\/strong>/i)
-      || html.match(/"protein"[^>]*>([\d.]+)/i)
+    const protMatch = html.match(/Protein[\s\S]{0,80}?<strong>([\d.]+)g?<\/strong>/i) || html.match(/"protein"[^>]*>([\d.]+)/i)
     if (protMatch) nutrition.protein = parseFloat(protMatch[1])
-
-    // Carbs
-    const carbMatch = html.match(/Carbohydrates[\s\S]{0,80}?<strong>([\d.]+)g?<\/strong>/i)
-      || html.match(/"carbohydrateContent"[^>]*>([\d.]+)/i)
+    const carbMatch = html.match(/Carbohydrates[\s\S]{0,80}?<strong>([\d.]+)g?<\/strong>/i) || html.match(/"carbohydrateContent"[^>]*>([\d.]+)/i)
     if (carbMatch) nutrition.carbs = parseFloat(carbMatch[1])
-
-    // Fat
-    const fatMatch = html.match(/Total Fat[\s\S]{0,80}?<strong>([\d.]+)g?<\/strong>/i)
-      || html.match(/"fatContent"[^>]*>([\d.]+)/i)
-    if (fatMatch) nutrition.fat = parseFloat(fatMatch[1])
-
-    // Servings
-    const servMatch = html.match(/serves\s*(\d+)/i) || html.match(/In Your Box \(serves (\d+)\)/i)
-    if (servMatch) nutrition.servings = parseInt(servMatch[1])
-
-    // Also grab the meal slug URL for reference
-    nutrition.sourceUrl = fetchUrl
-
-    return Object.keys(nutrition).length > 1 ? nutrition : null
-  } catch (e) {
-    console.warn('HomeChef nutrition fetch failed:', e.message)
-    return null
-  }
+    return Object.keys(nutrition).length > 0 ? nutrition : null
+  } catch { return null }
 }
 
-// Extract HomeChef URLs from PDF text
-export function extractHomeChefUrls(text) {
-  const urls = []
-  // Match both formats: homechef.com/12345 and homechef.com/meals/slug
-  const patterns = [
-    /(?:www\.)?homechef\.com\/(\d{4,6})\b/gi,
-    /(?:www\.)?homechef\.com\/meals\/([a-z0-9-]+)/gi,
-  ]
-  for (const pattern of patterns) {
-    let match
-    while ((match = pattern.exec(text)) !== null) {
-      const url = 'https://www.homechef.com/' + (match[1].match(/^\d+$/) ? match[1] : 'meals/' + match[1])
-      if (!urls.includes(url)) urls.push(url)
-    }
-  }
-  return urls
-}
-
+// ── fetchRecipeDetails — ONLY used for AI-generated meals with no saved data ──
+// Never used for PDF-uploaded recipes.
 export async function fetchRecipeDetails(recipe) {
   const raw = await callClaude(
-    [{ role: 'user', content: `Generate complete recipe details for: "${recipe.name}"${recipe.subtitle ? ' (' + recipe.subtitle + ')' : ''}.
-Return ONLY a JSON object with these fields:
-- ingredients: array of {item, amount} objects with realistic quantities
-- time: integer minutes
-- servings: integer (default 4)
-- calories: integer per serving
-Return ONLY the JSON object, no markdown.` }],
-    'You are a recipe details generator. Return only a valid JSON object. No markdown, no backticks.',
-    1000
+    [{ role: 'user', content: `Generate complete recipe details for: "${recipe.name}"${recipe.subtitle ? ' (' + recipe.subtitle + ')' : ''}.\nReturn ONLY a JSON object with:\n- ingredients: array of {item, amount}\n- instructions: array of step strings\n- time: integer minutes\n- servings: integer (default 4)\n- calories: integer per serving\nReturn ONLY the JSON object, no markdown.` }],
+    'You are a recipe details generator. Return only a valid JSON object. No markdown.',
+    1500
   )
   let cleaned = raw.trim()
   const s = cleaned.indexOf('{'), e = cleaned.lastIndexOf('}')

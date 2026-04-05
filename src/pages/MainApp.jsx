@@ -106,13 +106,30 @@ export default function MainApp({ user }) {
     getMealNotes(hh.id).then(setMealNotes)
     getPantry(hh.id).then(setPantryItems)
     import('../lib/supabase').then(m => m.getPreferences(hh.id)).then(setPreferences)
+    // Always re-merge saved menu snapshots with live recipe data
+    // so ingredients/instructions are always the real PDF versions
+    function mergeMenuWithRecipes(menuMeals, savedRecs) {
+      return menuMeals.map(menuMeal => {
+        const real = savedRecs.find(r =>
+          String(r.id) === String(menuMeal.id) || r.name?.toLowerCase() === menuMeal.name?.toLowerCase()
+        )
+        if (real) return { ...real, seasonal: menuMeal.seasonal ?? real.seasonal, calories: menuMeal.calories ?? real.calories, emoji: menuMeal.emoji || real.emoji || rndEmoji() }
+        return menuMeal
+      })
+    }
     if (menu?.meals) {
-      try { setWeeklyMenuState(JSON.parse(menu.meals)) } catch {}
+      try {
+        const parsed = JSON.parse(menu.meals)
+        setWeeklyMenuState(mergeMenuWithRecipes(parsed, recs))
+      } catch {}
     } else {
       refreshWeeklyMenu(hh.id, recs)
     }
     if (nextMenu?.meals) {
-      try { setNextWeekMenu(JSON.parse(nextMenu.meals)) } catch {}
+      try {
+        const parsed = JSON.parse(nextMenu.meals)
+        setNextWeekMenu(mergeMenuWithRecipes(parsed, recs))
+      } catch {}
     } else {
       refreshNextWeekMenu(hh.id, recs)
     }
@@ -151,7 +168,23 @@ export default function MainApp({ user }) {
     setNextMenuLoading(true)
     try {
       const meals = await generateWeeklyMenu(recs, preferences)
-      const tagged = meals.map(r => ({ ...r, id: r.id || stableId(r.name), emoji: rndEmoji() }))
+      const tagged = meals.map(aiMeal => {
+        // If this meal matches a saved recipe, use the real recipe data as the base
+        // and only overlay the AI's seasonal/calories updates
+        const realRecipe = recs.find(r =>
+          String(r.id) === String(aiMeal.id) || r.name?.toLowerCase() === aiMeal.name?.toLowerCase()
+        )
+        if (realRecipe) {
+          return {
+            ...realRecipe,
+            seasonal: aiMeal.seasonal ?? realRecipe.seasonal,
+            calories: aiMeal.calories ?? realRecipe.calories,
+            emoji: realRecipe.emoji || rndEmoji(),
+          }
+        }
+        // AI-generated meal with no match — keep as-is
+        return { ...aiMeal, id: aiMeal.id || stableId(aiMeal.name), emoji: rndEmoji() }
+      })
       setNextWeekMenu(tagged)
       await saveNextWeekMenu(hhId, tagged)
     } catch (e) { alert('Could not generate next week menu: ' + e.message) }
@@ -281,7 +314,20 @@ export default function MainApp({ user }) {
     setMenuLoading(true)
     try {
       const meals = await generateWeeklyMenu(recs, preferences)
-      const tagged = meals.map(r => ({ ...r, id: r.id || stableId(r.name), emoji: rndEmoji() }))
+      const tagged = meals.map(aiMeal => {
+        const realRecipe = recs.find(r =>
+          String(r.id) === String(aiMeal.id) || r.name?.toLowerCase() === aiMeal.name?.toLowerCase()
+        )
+        if (realRecipe) {
+          return {
+            ...realRecipe,
+            seasonal: aiMeal.seasonal ?? realRecipe.seasonal,
+            calories: aiMeal.calories ?? realRecipe.calories,
+            emoji: realRecipe.emoji || rndEmoji(),
+          }
+        }
+        return { ...aiMeal, id: aiMeal.id || stableId(aiMeal.name), emoji: rndEmoji() }
+      })
       setWeeklyMenuState(tagged)
       await saveWeeklyMenu(hhId, tagged)
     } catch (e) { alert('Could not generate menu: ' + e.message) }
