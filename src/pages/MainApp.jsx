@@ -49,6 +49,8 @@ export default function MainApp({ user }) {
   const [nextWeekAllPicks, setNextWeekAllPicks] = useState([])
   const [nextMenuLoading, setNextMenuLoading] = useState(false)
   const [nextWeekFilter, setNextWeekFilter] = useState('')
+  // Tracks user-chosen serving sizes per recipe (recipe id -> servings)
+  const [recipeScaling, setRecipeScaling] = useState({})
   // Meal notes, pantry, preferences state
   const [mealNotes, setMealNotes] = useState({})
   const [pantryItems, setPantryItems] = useState([])
@@ -336,7 +338,11 @@ export default function MainApp({ user }) {
 
   async function buildGroceryList() {
     const combined = getCombinedBox()
-    const sel = weeklyMenu.filter(r => combined.includes(r.id))
+    const sel = weeklyMenu.filter(r => combined.includes(r.id)).map(r => ({
+      ...r,
+      _baseServings: r.servings || 4,
+      servings: recipeScaling[String(r.id)] || r.servings || 4
+    }))
     if (!sel.length) { alert('No meals selected by anyone yet!'); return }
     setGroceryLoading(true)
     try {
@@ -357,7 +363,11 @@ export default function MainApp({ user }) {
       ...nextWeekPicks.map(String),
       ...nextWeekAllPicks.filter(p => p.user_id !== user.id).flatMap(p => (p.meal_ids || []).map(String))
     ])
-    const sel = nextWeekMenu.filter(r => allPickedIds.has(String(r.id)))
+    const sel = nextWeekMenu.filter(r => allPickedIds.has(String(r.id))).map(r => ({
+      ...r,
+      _baseServings: r.servings || 4,
+      servings: recipeScaling[String(r.id)] || r.servings || 4
+    }))
     if (!sel.length) { alert('No meals in your next week box yet!'); return }
     setGroceryLoading(true)
     try {
@@ -1078,6 +1088,8 @@ export default function MainApp({ user }) {
         userId={user.id}
         mealNotes={mealNotes}
         onNoteUpdate={(name, note) => setMealNotes(n => ({ ...n, [name]: note }))}
+        savedServings={selectedRecipe ? (recipeScaling[String(selectedRecipe.id)] || null) : null}
+        onServingsChange={(id, servings) => setRecipeScaling(prev => ({ ...prev, [String(id)]: servings }))}
       />
     </div>
   )

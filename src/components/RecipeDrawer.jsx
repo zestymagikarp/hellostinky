@@ -17,9 +17,9 @@ function safeTags(recipe) {
   return Array.isArray(tags) ? tags : []
 }
 
-export default function RecipeDrawer({ recipe, onClose, householdId, userId, mealNotes = {}, onNoteUpdate }) {
+export default function RecipeDrawer({ recipe, onClose, householdId, userId, mealNotes = {}, onNoteUpdate, savedServings, onServingsChange }) {
   const [drawerError, setDrawerError] = useState(false)
-  const [servings, setServings] = useState(recipe?.servings || 4)
+  const [servings, setServings] = useState(savedServings || recipe?.servings || 4)
   const [instructions, setInstructions] = useState(null)
   const [loadingInstructions, setLoadingInstructions] = useState(false)
   const [activeTab, setActiveTab] = useState('ingredients')
@@ -37,7 +37,7 @@ export default function RecipeDrawer({ recipe, onClose, householdId, userId, mea
 
   useEffect(() => {
     if (recipe) {
-      setServings(recipe.servings || 4)
+      setServings(savedServings || recipe.servings || 4)
       setInstructions(null)
       setActiveTab('ingredients')
       setCookingMode(false)
@@ -196,19 +196,27 @@ export default function RecipeDrawer({ recipe, onClose, householdId, userId, mea
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
             <span style={{ fontSize: 12, color: '#666' }}>Servings:</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 0, border: '0.5px solid rgba(0,0,0,0.15)', borderRadius: 8, overflow: 'hidden' }}>
-              <button onClick={() => setServings(s => Math.max(1, s - 1))} style={{
+              <button onClick={() => {
+                const next = Math.max(1, servings - 1)
+                setServings(next)
+                onServingsChange && onServingsChange(recipe.id, next)
+              }} style={{
                 width: 32, height: 32, background: '#f5f5f3', border: 'none',
                 fontSize: 18, cursor: 'pointer', fontWeight: 500
               }}>−</button>
               <span style={{ width: 32, textAlign: 'center', fontSize: 14, fontWeight: 600 }}>{servings}</span>
-              <button onClick={() => setServings(s => s + 1)} style={{
+              <button onClick={() => {
+                const next = servings + 1
+                setServings(next)
+                onServingsChange && onServingsChange(recipe.id, next)
+              }} style={{
                 width: 32, height: 32, background: '#f5f5f3', border: 'none',
                 fontSize: 18, cursor: 'pointer', fontWeight: 500
               }}>+</button>
             </div>
             {scale !== 1 && (
               <span style={{ fontSize: 11, color: '#3c6e47', background: '#eaf3de', padding: '2px 8px', borderRadius: 20 }}>
-                {scale > 1 ? `×${scale.toFixed(1)}` : `×${scale.toFixed(1)}`} scaled
+                ×{scale.toFixed(1)} scaled — grocery list will use these amounts
               </span>
             )}
           </div>
