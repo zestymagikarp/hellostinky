@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, getMyHousehold, getRecipes, getWeeklyMenu, saveWeeklyMenu, getMyPicks, savePicks, getAllPicks, getHouseholdMembers, saveRecipe, deleteRecipe, saveRating, archiveWeek, getNextWeekMenu, saveNextWeekMenu, getMyNextWeekPicks, saveNextWeekPicks, getAllNextWeekPicks, getMealNotes, getPantry } from '../lib/supabase'
-import { generateWeeklyMenu, generateGroceryList, extractRecipesFromText, extractRecipesFromImages } from '../lib/ai'
+import { generateWeeklyMenu, generateGroceryList, extractRecipesFromText, extractRecipesFromImages, fetchHomeChefNutrition, extractHomeChefUrls } from '../lib/ai'
 import { extractTextFromPDF, extractImagesFromPDF, isScannedPDF } from '../lib/pdfExtract'
 import { useScheduler, requestNotificationPermission } from '../lib/scheduler'
 import MealCard from '../components/MealCard'
@@ -328,12 +328,38 @@ export default function MainApp({ user }) {
           setProgress('Extracting text from PDF...', 15)
           const text = await extractTextFromPDF(file)
           const kb = Math.round(text.length / 1000)
-          setProgress(`Found ${kb}k characters — scanning for recipes...`, 30)
-          // Hook into extractRecipesFromText progress via a wrapper
+
+          // Check for HomeChef URLs in the PDF
+          const homeChefUrls = extractHomeChefUrls(text)
+          const isHomeChef = homeChefUrls.length > 0
+
+          setProgress(`Found ${kb}k characters${isHomeChef ? ` + ${homeChefUrls.length} HomeChef recipe link${homeChefUrls.length > 1 ? 's' : ''}` : ''} — scanning for recipes...`, 30)
+
           arr = await extractRecipesFromText(text, (chunkDone, chunkTotal) => {
-            const pct = 30 + Math.round((chunkDone / chunkTotal) * 55)
+            const pct = 30 + Math.round((chunkDone / chunkTotal) * (isHomeChef ? 40 : 55))
             setProgress(`Scanning chunk ${chunkDone} of ${chunkTotal}...`, pct)
           })
+
+          // If HomeChef PDF: fetch real nutrition data for each recipe
+          if (isHomeChef && arr.length > 0) {
+            setProgress(`Fetching real nutrition from HomeChef for ${arr.length} recipe${arr.length > 1 ? 's' : ''}...`, 72)
+            // Match each URL to each recipe (1 URL per recipe card typically)
+            for (let i = 0; i < arr.length; i++) {
+              const url = homeChefUrls[i] || homeChefUrls[0]
+              if (!url) continue
+              setProgress(`Fetching nutrition for "${arr[i].name}"...`, 72 + Math.round((i / arr.length) * 15))
+              const nutrition = await fetchHomeChefNutrition(url)
+              if (nutrition) {
+                arr[i] = {
+                  ...arr[i],
+                  calories: nutrition.calories || arr[i].calories,
+                  servings: nutrition.servings || arr[i].servings,
+                  subtitle: arr[i].subtitle || '',
+                  _nutrition: nutrition, // store full nutrition for display
+                }
+              }
+            }
+          }
         } else {
           setProgress('Scanned PDF detected — rendering pages...', 10)
           const pages = await extractImagesFromPDF(file, (done, total) => {

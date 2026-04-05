@@ -33,3 +33,6 @@ export default async function handler(req, res) {
     res.status(500).json({ error: { message: err.message } })
   }
 }
+
+// Also expose a fetch-url endpoint for server-side URL fetching (avoids CORS)
+// Accessed as /api/fetch-url?url=...

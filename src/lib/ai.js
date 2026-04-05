@@ -209,3 +209,74 @@ export async function extractRecipesFromText(text, onProgress) {
     return true
   })
 }
+
+// ── HomeChef nutrition fetcher ────────────────────────────────
+// Extracts real nutrition data from a HomeChef recipe page URL
+export async function fetchHomeChefNutrition(url) {
+  try {
+    // Normalize URL — both /32130 and /meals/slug formats work
+    let fetchUrl = url.trim()
+    if (!fetchUrl.startsWith('http')) fetchUrl = 'https://' + fetchUrl
+    fetchUrl = fetchUrl.replace('www.homechef.com', 'homechef.com')
+    if (!fetchUrl.includes('homechef.com')) return null
+
+    // Fetch via our server-side proxy to avoid CORS
+    const res = await fetch(`/api/fetch-url?url=${encodeURIComponent(fetchUrl)}`)
+    if (!res.ok) return null
+    const html = await res.text()
+
+    // Parse nutrition from HTML
+    const nutrition = {}
+
+    // Calories
+    const calMatch = html.match(/Calories[^<]*<[^>]*>\s*<strong>([\d,]+)<\/strong>/i)
+      || html.match(/Calories[\s\S]{0,50}?<strong>([\d,]+)<\/strong>/i)
+      || html.match(/"calories"[^>]*>([\d,]+)/i)
+    if (calMatch) nutrition.calories = parseInt(calMatch[1].replace(',', ''))
+
+    // Protein
+    const protMatch = html.match(/Protein[\s\S]{0,80}?<strong>([\d.]+)g?<\/strong>/i)
+      || html.match(/"protein"[^>]*>([\d.]+)/i)
+    if (protMatch) nutrition.protein = parseFloat(protMatch[1])
+
+    // Carbs
+    const carbMatch = html.match(/Carbohydrates[\s\S]{0,80}?<strong>([\d.]+)g?<\/strong>/i)
+      || html.match(/"carbohydrateContent"[^>]*>([\d.]+)/i)
+    if (carbMatch) nutrition.carbs = parseFloat(carbMatch[1])
+
+    // Fat
+    const fatMatch = html.match(/Total Fat[\s\S]{0,80}?<strong>([\d.]+)g?<\/strong>/i)
+      || html.match(/"fatContent"[^>]*>([\d.]+)/i)
+    if (fatMatch) nutrition.fat = parseFloat(fatMatch[1])
+
+    // Servings
+    const servMatch = html.match(/serves\s*(\d+)/i) || html.match(/In Your Box \(serves (\d+)\)/i)
+    if (servMatch) nutrition.servings = parseInt(servMatch[1])
+
+    // Also grab the meal slug URL for reference
+    nutrition.sourceUrl = fetchUrl
+
+    return Object.keys(nutrition).length > 1 ? nutrition : null
+  } catch (e) {
+    console.warn('HomeChef nutrition fetch failed:', e.message)
+    return null
+  }
+}
+
+// Extract HomeChef URLs from PDF text
+export function extractHomeChefUrls(text) {
+  const urls = []
+  // Match both formats: homechef.com/12345 and homechef.com/meals/slug
+  const patterns = [
+    /(?:www\.)?homechef\.com\/(\d{4,6})\b/gi,
+    /(?:www\.)?homechef\.com\/meals\/([a-z0-9-]+)/gi,
+  ]
+  for (const pattern of patterns) {
+    let match
+    while ((match = pattern.exec(text)) !== null) {
+      const url = 'https://www.homechef.com/' + (match[1].match(/^\d+$/) ? match[1] : 'meals/' + match[1])
+      if (!urls.includes(url)) urls.push(url)
+    }
+  }
+  return urls
+}
