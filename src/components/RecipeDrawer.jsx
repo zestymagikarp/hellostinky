@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { generateRecipeInstructions, suggestProteinSwaps } from '../lib/ai'
+import { generateRecipeInstructions, suggestProteinSwaps, fetchRecipeDetails } from '../lib/ai'
 import MealNoteEditor from './MealNoteEditor'
 
 const BADGE_LABELS = { calorie: 'Calorie Smart', quick: '20-Min Meal', gourmet: 'Gourmet', taste: 'Taste Tours' }
@@ -29,6 +29,8 @@ export default function RecipeDrawer({ recipe, onClose, householdId, userId, mea
   const [loadingProtein, setLoadingProtein] = useState(false)
   const [selectedProtein, setSelectedProtein] = useState(null)
   const [calAdjustment, setCalAdjustment] = useState(0)
+  const [recipeDetails, setRecipeDetails] = useState(null) // enriched details fetched on demand
+  const [loadingDetails, setLoadingDetails] = useState(false)
 
   const baseServings = recipe?.servings || 4
   const scale = servings / baseServings
@@ -44,15 +46,34 @@ export default function RecipeDrawer({ recipe, onClose, householdId, userId, mea
       setSelectedProtein(null)
       setCalAdjustment(0)
       setDrawerError(false)
+      setRecipeDetails(null)
     }
   }, [recipe?.id])
+
+  // If the recipe has no ingredients, fetch them from AI on open
+  useEffect(() => {
+    if (!recipe) return
+    const ings = safeIngredients(recipe)
+    if (ings.length === 0 && !recipeDetails && !loadingDetails) {
+      setLoadingDetails(true)
+      fetchRecipeDetails(recipe)
+        .then(details => setRecipeDetails(details))
+        .catch(() => {}) // silent fail, show "no ingredients" message
+        .finally(() => setLoadingDetails(false))
+    }
+  }, [recipe?.id])
+
+  // Merged recipe = original + any fetched details
+  const enrichedRecipe = recipeDetails
+    ? { ...recipe, ...recipeDetails, ingredients: recipeDetails.ingredients || safeIngredients(recipe) }
+    : recipe
 
   async function loadProteinSwaps() {
     if (proteinSwaps) { setActiveTab('protein'); return }
     setLoadingProtein(true)
     setActiveTab('protein')
     try {
-      const data = await suggestProteinSwaps(recipe)
+      const data = await suggestProteinSwaps(enrichedRecipe)
       setProteinSwaps(data)
     } catch (e) {
       setProteinSwaps({ error: 'Could not load protein suggestions.' })
@@ -75,7 +96,7 @@ export default function RecipeDrawer({ recipe, onClose, householdId, userId, mea
     setLoadingInstructions(true)
     setActiveTab('steps')
     try {
-      const data = await generateRecipeInstructions(recipe)
+      const data = await generateRecipeInstructions(enrichedRecipe)
       setInstructions(data)
     } catch (e) {
       setInstructions({ error: 'Could not generate instructions. Please try again.' })
@@ -220,10 +241,15 @@ export default function RecipeDrawer({ recipe, onClose, householdId, userId, mea
                 )}
                 {scale !== 1 && ' (scaled)'}
               </div>
-              {safeIngredients(recipe).length === 0 ? (
+              {loadingDetails ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#3c6e47', fontSize: 13 }}>
+                  <div className="spinner" style={{ borderTopColor: '#3c6e47', borderColor: '#c0dd97' }} />
+                  Loading ingredients...
+                </div>
+              ) : safeIngredients(enrichedRecipe).length === 0 ? (
                 <div style={{ color: '#888', fontSize: 13 }}>No ingredients listed.</div>
               ) : (
-                safeIngredients(recipe).map((ing, i) => (
+                safeIngredients(enrichedRecipe).map((ing, i) => (
                   <div key={i} style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     padding: '10px 0', borderBottom: '0.5px solid rgba(0,0,0,0.06)',
@@ -242,8 +268,8 @@ export default function RecipeDrawer({ recipe, onClose, householdId, userId, mea
               {householdId && userId && (
                 <MealNoteEditor
                   householdId={householdId}
-                  mealName={recipe?.name}
-                  existingNote={mealNotes[recipe?.name]}
+                  mealName={enrichedRecipe?.name}
+                  existingNote={mealNotes[enrichedRecipe?.name]}
                   userId={userId}
                   onUpdate={onNoteUpdate}
                 />

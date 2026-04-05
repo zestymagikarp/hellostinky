@@ -284,3 +284,21 @@ export function extractHomeChefUrls(text) {
   }
   return urls
 }
+
+export async function fetchRecipeDetails(recipe) {
+  const raw = await callClaude(
+    [{ role: 'user', content: `Generate complete recipe details for: "${recipe.name}"${recipe.subtitle ? ' (' + recipe.subtitle + ')' : ''}.
+Return ONLY a JSON object with these fields:
+- ingredients: array of {item, amount} objects with realistic quantities
+- time: integer minutes
+- servings: integer (default 4)
+- calories: integer per serving
+Return ONLY the JSON object, no markdown.` }],
+    'You are a recipe details generator. Return only a valid JSON object. No markdown, no backticks.',
+    1000
+  )
+  let cleaned = raw.trim()
+  const s = cleaned.indexOf('{'), e = cleaned.lastIndexOf('}')
+  if (s !== -1 && e !== -1) cleaned = cleaned.slice(s, e + 1)
+  return JSON.parse(cleaned)
+}
