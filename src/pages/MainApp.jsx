@@ -279,6 +279,25 @@ export default function MainApp({ user }) {
     setGroceryLoading(false)
   }
 
+  async function buildNextWeekGroceryList() {
+    const pickerMap = getNextWeekPickerMap()
+    const combinedIds = Object.keys(pickerMap).map(Number)
+    const sel = nextWeekMenu.filter(r => combinedIds.includes(r.id))
+    if (!sel.length) { alert('No meals in your next week box yet!'); return }
+    setGroceryLoading(true)
+    try {
+      const items = await generateGroceryList(sel)
+      const pantryNames = new Set(pantryItems.map(p => p.name.toLowerCase()))
+      setGroceryItems(items.map((it, i) => ({
+        ...it, id: i,
+        checked: pantryNames.has(it.name?.toLowerCase()),
+        inPantry: pantryNames.has(it.name?.toLowerCase())
+      })))
+      setTab('grocery')
+    } catch (e) { alert('Could not build grocery list: ' + e.message) }
+    setGroceryLoading(false)
+  }
+
   function getCombinedBox() {
     const pickerMap = getPickerMap()
     return Object.keys(pickerMap).map(Number)
@@ -477,10 +496,127 @@ export default function MainApp({ user }) {
           if (nextWeekFilter === 'quick') return r.time <= 25
           return (r.tags || []).includes(nextWeekFilter)
         })
+        const nextCombinedBox = getNextWeekCombinedBox()
+        const nextCombinedMeals = nextWeekMenu.filter(r => nextCombinedBox.includes(r.id))
+        const myNextPicks = nextWeekMenu.filter(r => nextPicksSet.has(r.id))
+        const partnerNextPicks = nextWeekAllPicks
+          .filter(p => p.user_id !== user.id)
+          .flatMap(p => (p.meal_ids || []).map(id => nextWeekMenu.find(r => r.id === id)).filter(Boolean))
+        const totalCals = myNextPicks.reduce((s, r) => s + (r.calories || 0), 0)
+
         return (
           <div className="page">
-            <div className="page-title">Next week's menu</div>
-            <div className="page-sub">Pick your meals for next week — your choices sync with your partner in real time</div>
+
+            {/* ── Next Week Box Summary (top) ── */}
+            <div style={{ background: '#fff', border: '0.5px solid rgba(0,0,0,0.1)', borderRadius: 12, padding: '16px', marginBottom: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>Your next week box</div>
+                  <div style={{ fontSize: 12, color: '#888' }}>
+                    {nextCombinedMeals.length === 0
+                      ? 'No meals picked yet — add from the menu below'
+                      : `${nextCombinedMeals.length} meal${nextCombinedMeals.length !== 1 ? 's' : ''} combined from household`}
+                  </div>
+                </div>
+                {nextCombinedMeals.length > 0 && (
+                  <button
+                    onClick={buildNextWeekGroceryList}
+                    disabled={groceryLoading}
+                    style={{
+                      background: '#3c6e47', color: '#fff', border: 'none',
+                      borderRadius: 10, padding: '9px 14px', fontSize: 13,
+                      fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      opacity: groceryLoading ? 0.7 : 1
+                    }}
+                  >
+                    {groceryLoading ? '⏳ Building...' : '🛒 Confirm & build grocery list'}
+                  </button>
+                )}
+              </div>
+
+              {nextCombinedMeals.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '16px 0', color: '#bbb', fontSize: 13 }}>
+                  Pick meals from the menu below to fill your box
+                </div>
+              ) : (
+                <>
+                  {/* My picks row */}
+                  {myNextPicks.length > 0 && (
+                    <div style={{ marginBottom: partnerNextPicks.length > 0 ? 12 : 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                        Your picks ({myNextPicks.length})
+                        {totalCals > 0 && <span style={{ marginLeft: 8, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>· ~{totalCals} cal total</span>}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {myNextPicks.map(r => (
+                          <div key={r.id} style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            background: '#eaf3de', borderRadius: 10,
+                            padding: '8px 10px', cursor: 'pointer',
+                            border: '0.5px solid #c0dd97', flex: '1 1 auto', minWidth: 160, maxWidth: 260
+                          }} onClick={() => setSelectedRecipe(r)}>
+                            <span style={{ fontSize: 20, flexShrink: 0 }}>{r.emoji || '🍽'}</span>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: '#27500a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
+                              <div style={{ fontSize: 11, color: '#3b6d11' }}>{r.time} min{r.calories ? ` · ${r.calories} cal` : ''}</div>
+                            </div>
+                            <button
+                              onClick={e => { e.stopPropagation(); toggleNextWeekPick(r.id) }}
+                              style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#3b6d11', fontSize: 14, flexShrink: 0, padding: '2px 4px' }}
+                              title="Remove from box"
+                            >✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Partner picks row */}
+                  {partnerNextPicks.length > 0 && (
+                    <div style={{ paddingTop: myNextPicks.length > 0 ? 10 : 0, borderTop: myNextPicks.length > 0 ? '0.5px solid rgba(0,0,0,0.06)' : 'none' }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                        Partner's picks ({partnerNextPicks.length})
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {partnerNextPicks.map(r => (
+                          <div key={r.id} style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            background: '#fff3e0', borderRadius: 10,
+                            padding: '8px 10px',
+                            border: '0.5px solid #fcd34d', flex: '1 1 auto', minWidth: 160, maxWidth: 260
+                          }}>
+                            <span style={{ fontSize: 20, flexShrink: 0 }}>{r.emoji || '🍽'}</span>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: '#92400e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
+                              <div style={{ fontSize: 11, color: '#b45309' }}>{r.time} min{r.calories ? ` · ${r.calories} cal` : ''}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Progress toward target */}
+                  <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ flex: 1, background: 'rgba(0,0,0,0.06)', borderRadius: 20, height: 6, overflow: 'hidden' }}>
+                      <div style={{
+                        height: '100%', borderRadius: 20, background: '#3c6e47',
+                        width: `${Math.min(100, (nextWeekPicks.length / mealsPerWeek) * 100)}%`,
+                        transition: 'width 0.3s ease'
+                      }} />
+                    </div>
+                    <span style={{ fontSize: 12, color: '#555', flexShrink: 0 }}>
+                      {nextWeekPicks.length}/{mealsPerWeek} picked
+                      {nextWeekPicks.length >= mealsPerWeek && <span style={{ color: '#3c6e47', fontWeight: 600 }}> ✓ Ready!</span>}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="page-title">This week's menu</div>
+            <div className="page-sub">Tap a meal to add it to your box above — your choices sync with your partner in real time</div>
 
             <div className="controls">
               <label>Meals/week:</label>
@@ -498,10 +634,6 @@ export default function MainApp({ user }) {
               <button className="btn btn-green btn-sm" onClick={() => refreshNextWeekMenu()} disabled={nextMenuLoading}>
                 {nextMenuLoading ? '...' : '✦ Refresh menu'}
               </button>
-            </div>
-
-            <div style={{ background: '#f0f9ff', border: '0.5px solid #bae6fd', borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: '#0c4a6e' }}>
-              📋 You've picked <strong>{nextWeekPicks.length}</strong> of <strong>{mealsPerWeek}</strong> meals for next week
             </div>
 
             {nextMenuLoading && <div className="loading-bar"><div className="spinner" />Curating next week's seasonal menu...</div>}
