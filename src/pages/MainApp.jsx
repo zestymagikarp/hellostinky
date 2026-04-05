@@ -397,21 +397,20 @@ export default function MainApp({ user }) {
           const text = await extractTextFromPDF(file)
           const kb = Math.round(text.length / 1000)
 
-          // Check for HomeChef URLs in the PDF
+          // Detect HomeChef URLs embedded in the PDF
           const homeChefUrls = extractHomeChefUrls(text)
           const isHomeChef = homeChefUrls.length > 0
 
-          setProgress(`Found ${kb}k characters${isHomeChef ? ` + ${homeChefUrls.length} HomeChef recipe link${homeChefUrls.length > 1 ? 's' : ''}` : ''} — scanning for recipes...`, 30)
+          setProgress(`Found ${kb}k characters${isHomeChef ? ` + ${homeChefUrls.length} HomeChef link${homeChefUrls.length > 1 ? 's' : ''}` : ''} — scanning for recipes...`, 30)
 
           arr = await extractRecipesFromText(text, (chunkDone, chunkTotal) => {
             const pct = 30 + Math.round((chunkDone / chunkTotal) * (isHomeChef ? 40 : 55))
             setProgress(`Scanning chunk ${chunkDone} of ${chunkTotal}...`, pct)
           })
 
-          // If HomeChef PDF: fetch real nutrition data for each recipe
+          // For HomeChef PDFs: fetch real nutrition data from each recipe's URL
           if (isHomeChef && arr.length > 0) {
             setProgress(`Fetching real nutrition from HomeChef for ${arr.length} recipe${arr.length > 1 ? 's' : ''}...`, 72)
-            // Match each URL to each recipe (1 URL per recipe card typically)
             for (let i = 0; i < arr.length; i++) {
               const url = homeChefUrls[i] || homeChefUrls[0]
               if (!url) continue
@@ -422,8 +421,6 @@ export default function MainApp({ user }) {
                   ...arr[i],
                   calories: nutrition.calories || arr[i].calories,
                   servings: nutrition.servings || arr[i].servings,
-                  subtitle: arr[i].subtitle || '',
-                  _nutrition: nutrition, // store full nutrition for display
                 }
               }
             }

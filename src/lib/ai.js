@@ -261,3 +261,11 @@ export async function fetchRecipeDetails(recipe) {
   if (s !== -1 && e !== -1) cleaned = cleaned.slice(s, e + 1)
   return JSON.parse(cleaned)
 }
+
+// ── HomeChef URL extractor ────────────────────────────────────
+// Finds homechef.com recipe URLs embedded in PDF text
+export function extractHomeChefUrls(text) {
+  const matches = text.match(/https?:\/\/(?:www\.)?homechef\.com\/[^\s"')>]+/gi) || []
+  // Deduplicate
+  return [...new Set(matches)]
+}
