@@ -305,25 +305,53 @@ export default function MainApp({ user }) {
   }
 
   // Recipes tab
+  // Split a base64 PDF into chunks by re-reading as array buffer and slicing bytes
+  async function readFileAsB64(file) {
+    return new Promise((res, rej) => {
+      const fr = new FileReader()
+      fr.onload = () => res(fr.result.split(',')[1])
+      fr.onerror = rej
+      fr.readAsDataURL(file)
+    })
+  }
+
+  async function splitAndUploadPDF(file, itemKey) {
+    // Chunk size: 8MB of raw file bytes = ~10.5MB base64, well under Vercel limit
+    const CHUNK_BYTES = 8 * 1024 * 1024
+    const chunks = Math.ceil(file.size / CHUNK_BYTES)
+    let allRecipes = []
+
+    for (let i = 0; i < chunks; i++) {
+      const start = i * CHUNK_BYTES
+      const end = Math.min(start + CHUNK_BYTES, file.size)
+      const chunk = file.slice(start, end)
+      const chunkFile = new File([chunk], file.name, { type: 'application/pdf' })
+
+      setUploadItems(prev => prev.map(it => it.key === itemKey
+        ? { ...it, msg: chunks > 1 ? `Processing part ${i + 1} of ${chunks}...` : 'Extracting recipes with AI...' }
+        : it))
+
+      const b64 = await readFileAsB64(chunkFile)
+      try {
+        const extracted = await extractRecipesFromPDF(b64)
+        const arr = Array.isArray(extracted) ? extracted : [extracted]
+        allRecipes = [...allRecipes, ...arr]
+      } catch (e) {
+        // If a chunk fails, log but continue with other chunks
+        console.warn(`Chunk ${i + 1} failed:`, e.message)
+      }
+    }
+    return allRecipes
+  }
+
   async function handleFiles(files) {
     for (const file of Array.from(files)) {
       if (file.type !== 'application/pdf') continue
-      if (file.size > 20 * 1024 * 1024) {
-        setUploadItems(prev => [...prev, { key: Date.now() + file.name, name: file.name, status: 'err', msg: 'File too large (max 20MB). Try splitting the PDF into smaller parts.' }])
-        continue
-      }
       const itemKey = Date.now() + file.name
       setUploadItems(prev => [...prev, { key: itemKey, name: file.name, status: 'loading', msg: 'Reading PDF...' }])
       try {
-        const b64 = await new Promise((res, rej) => {
-          const fr = new FileReader()
-          fr.onload = () => res(fr.result.split(',')[1])
-          fr.onerror = rej
-          fr.readAsDataURL(file)
-        })
-        setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: 'Extracting recipes with AI...' } : it))
-        const extracted = await extractRecipesFromPDF(b64)
-        const arr = Array.isArray(extracted) ? extracted : [extracted]
+        const arr = await splitAndUploadPDF(file, itemKey)
+        if (arr.length === 0) throw new Error('No recipes found in this PDF. Make sure it contains actual recipe content.')
         setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: `Saving ${arr.length} recipes...` } : it))
         for (const r of arr) {
           const saved = await saveRecipe({ ...r, emoji: rndEmoji() }, household.id)
