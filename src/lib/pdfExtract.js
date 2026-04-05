@@ -1,5 +1,3 @@
-// PDF text + image extraction for both text-based and scanned PDFs
-
 async function loadPdfJs() {
   if (window.pdfjsLib) return window.pdfjsLib
   await new Promise((resolve, reject) => {
@@ -14,7 +12,6 @@ async function loadPdfJs() {
   return window.pdfjsLib
 }
 
-// Try to extract text — returns empty string if scanned
 export async function extractTextFromPDF(file) {
   const pdfjsLib = await loadPdfJs()
   const arrayBuffer = await file.arrayBuffer()
@@ -29,8 +26,14 @@ export async function extractTextFromPDF(file) {
   return fullText.trim()
 }
 
-// Render PDF pages as compressed JPEG base64 images
-// Returns array of { pageNum, b64, width, height }
+export async function isScannedPDF(file) {
+  const text = await extractTextFromPDF(file)
+  const approxPages = Math.max(1, file.size / 50000)
+  return text.length / approxPages < 100
+}
+
+// Render pages as small grayscale-ish images — max 800px wide, 50% JPEG quality
+// Keeps each page image under ~80KB so 2 pages per batch stays well under 200KB
 export async function extractImagesFromPDF(file, onProgress) {
   const pdfjsLib = await loadPdfJs()
   const arrayBuffer = await file.arrayBuffer()
@@ -42,25 +45,23 @@ export async function extractImagesFromPDF(file, onProgress) {
   for (let i = 1; i <= pdf.numPages; i++) {
     onProgress && onProgress(i, pdf.numPages)
     const page = await pdf.getPage(i)
-    // Scale to max 1200px wide for good OCR without huge file size
     const viewport = page.getViewport({ scale: 1 })
-    const scale = Math.min(1200 / viewport.width, 1.5)
+    // Max 800px wide — good enough for AI to read text, keeps file small
+    const scale = Math.min(800 / viewport.width, 1.2)
     const scaled = page.getViewport({ scale })
-    canvas.width = scaled.width
-    canvas.height = scaled.height
+    canvas.width = Math.round(scaled.width)
+    canvas.height = Math.round(scaled.height)
+    // White background first
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
     await page.render({ canvasContext: ctx, viewport: scaled }).promise
-    // JPEG at 0.7 quality — good balance of readability vs size
-    const b64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1]
+    // 50% JPEG quality — text is still perfectly readable, file is tiny
+    const b64 = canvas.toDataURL('image/jpeg', 0.5).split(',')[1]
+    // Log size for debugging
+    const kb = Math.round(b64.length * 0.75 / 1024)
+    console.log(`Page ${i}: ${kb}KB`)
     images.push({ pageNum: i, b64, totalPages: pdf.numPages })
   }
   canvas.remove()
   return images
-}
-
-// Detect if PDF is scanned (very little extractable text)
-export async function isScannedPDF(file) {
-  const text = await extractTextFromPDF(file)
-  // Less than 100 chars per page on average = likely scanned
-  const approxPages = Math.max(1, file.size / 50000)
-  return text.length / approxPages < 100
 }
