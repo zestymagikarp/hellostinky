@@ -13,6 +13,13 @@ import PreferencesPanel from '../components/PreferencesPanel'
 
 const EMOJIS = ['🍗','🥩','🥦','🍝','🍜','🥗','🍣','🍛','🥘','🫕','🍲','🌮','🐟','🍱','🥙']
 const rndEmoji = () => EMOJIS[Math.floor(Math.random() * EMOJIS.length)]
+// Stable numeric ID from recipe name so picks survive menu refreshes
+function stableId(name) {
+  if (!name) return Date.now() + Math.random()
+  let hash = 0
+  for (let i = 0; i < name.length; i++) { hash = ((hash << 5) - hash) + name.charCodeAt(i); hash |= 0 }
+  return Math.abs(hash)
+}
 
 export default function MainApp({ user }) {
   const [tab, setTab] = useState('thisweek')
@@ -144,7 +151,7 @@ export default function MainApp({ user }) {
     setNextMenuLoading(true)
     try {
       const meals = await generateWeeklyMenu(recs, preferences)
-      const tagged = meals.map(r => ({ ...r, id: r.id || Date.now() + Math.random(), emoji: rndEmoji() }))
+      const tagged = meals.map(r => ({ ...r, id: r.id || stableId(r.name), emoji: rndEmoji() }))
       setNextWeekMenu(tagged)
       await saveNextWeekMenu(hhId, tagged)
     } catch (e) { alert('Could not generate next week menu: ' + e.message) }
@@ -255,7 +262,7 @@ export default function MainApp({ user }) {
     setMenuLoading(true)
     try {
       const meals = await generateWeeklyMenu(recs, preferences)
-      const tagged = meals.map(r => ({ ...r, id: r.id || Date.now() + Math.random(), emoji: rndEmoji() }))
+      const tagged = meals.map(r => ({ ...r, id: r.id || stableId(r.name), emoji: rndEmoji() }))
       setWeeklyMenuState(tagged)
       await saveWeeklyMenu(hhId, tagged)
     } catch (e) { alert('Could not generate menu: ' + e.message) }
@@ -496,12 +503,15 @@ export default function MainApp({ user }) {
           if (nextWeekFilter === 'quick') return r.time <= 25
           return (r.tags || []).includes(nextWeekFilter)
         })
+        // Use string comparison for IDs since DB may return strings
         const nextCombinedBox = getNextWeekCombinedBox()
-        const nextCombinedMeals = nextWeekMenu.filter(r => nextCombinedBox.includes(r.id))
-        const myNextPicks = nextWeekMenu.filter(r => nextPicksSet.has(r.id))
+        const idMatch = (a, b) => String(a) === String(b)
+        const myNextPicks = nextWeekMenu.filter(r => nextWeekPicks.some(id => idMatch(r.id, id)))
         const partnerNextPicks = nextWeekAllPicks
           .filter(p => p.user_id !== user.id)
-          .flatMap(p => (p.meal_ids || []).map(id => nextWeekMenu.find(r => r.id === id)).filter(Boolean))
+          .flatMap(p => (p.meal_ids || []).map(id => nextWeekMenu.find(r => idMatch(r.id, id))).filter(Boolean))
+        const allPickedIds = new Set([...nextWeekPicks.map(String), ...nextWeekAllPicks.filter(p => p.user_id !== user.id).flatMap(p => (p.meal_ids || []).map(String))])
+        const nextCombinedMeals = nextWeekMenu.filter(r => allPickedIds.has(String(r.id)))
         const totalCals = myNextPicks.reduce((s, r) => s + (r.calories || 0), 0)
 
         return (
