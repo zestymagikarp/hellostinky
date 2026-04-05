@@ -135,7 +135,7 @@ export default function MainApp({ user }) {
     for (const file of Array.from(files)) {
       if (file.type !== 'application/pdf') continue
       const itemKey = Date.now() + file.name
-      setUploadItems(prev => [...prev, { key: itemKey, name: file.name, status: 'loading' }])
+      setUploadItems(prev => [...prev, { key: itemKey, name: file.name, status: 'loading', msg: 'Reading PDF...' }])
       try {
         const b64 = await new Promise((res, rej) => {
           const fr = new FileReader()
@@ -143,13 +143,15 @@ export default function MainApp({ user }) {
           fr.onerror = rej
           fr.readAsDataURL(file)
         })
+        setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: 'Extracting recipes with AI...' } : it))
         const extracted = await extractRecipesFromPDF(b64)
         const arr = Array.isArray(extracted) ? extracted : [extracted]
+        setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, msg: `Saving ${arr.length} recipes...` } : it))
         for (const r of arr) {
           const saved = await saveRecipe({ ...r, emoji: rndEmoji() }, household.id)
           setRecipes(prev => [saved, ...prev])
         }
-        setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, status: 'done', count: arr.length } : it))
+        setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, status: 'done', count: arr.length, names: arr.map(r => r.name) } : it))
       } catch (err) {
         setUploadItems(prev => prev.map(it => it.key === itemKey ? { ...it, status: 'err', msg: err.message } : it))
       }
@@ -390,11 +392,22 @@ export default function MainApp({ user }) {
               {it.status === 'loading' && <div className="spinner" style={{ borderTopColor: '#3c6e47', borderColor: '#c0dd97' }} />}
               {it.status === 'done' && <span>✓</span>}
               {it.status === 'err' && <span>✕</span>}
-              <span>
-                {it.status === 'loading' && `Reading "${it.name}"...`}
-                {it.status === 'done' && `Added ${it.count} recipe${it.count !== 1 ? 's' : ''} from "${it.name}"`}
-                {it.status === 'err' && `Failed: ${it.name} — ${it.msg}`}
-              </span>
+              <div style={{ flex: 1 }}>
+                {it.status === 'loading' && <div>{it.msg || `Reading "${it.name}"...`}</div>}
+                {it.status === 'done' && (
+                  <>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                      Found {it.count} recipe{it.count !== 1 ? 's' : ''} in "{it.name}"
+                    </div>
+                    {it.names && (
+                      <div style={{ fontSize: 11, opacity: 0.8 }}>
+                        {it.names.join(' · ')}
+                      </div>
+                    )}
+                  </>
+                )}
+                {it.status === 'err' && <div>Failed to read "{it.name}" — {it.msg}</div>}
+              </div>
             </div>
           ))}
 

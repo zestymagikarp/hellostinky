@@ -62,10 +62,16 @@ export async function extractRecipesFromPDF(base64Data) {
       role: 'user',
       content: [
         { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } },
-        { type: 'text', text: 'Extract all recipes from this PDF. For each return JSON with: name, subtitle, time (int, minutes), servings (int), calories (int, per serving — estimate if not stated), price (float, estimate 9-12), badge (calorie|quick|gourmet|taste|""), tags (array), ingredients (array of {item,amount}), seasonal (short seasonal note or null). Return ONLY a JSON array.' }
+        { type: 'text', text: 'Find EVERY recipe in this document and extract them all without skipping any. For each recipe return a JSON object with: name, subtitle (one-line description), time (int, total minutes), servings (int, default 4), calories (int per serving, estimate if needed), price (float, estimated USD per serving 8-14), badge (calorie|quick|gourmet|taste or empty string), tags (array from: chicken,beef,pork,fish,vegetarian,vegan,pasta,healthy,quick,family,spicy), ingredients (array of {item, amount}), seasonal (short note or null). Return ONLY a raw JSON array starting with [ and ending with ] — no markdown, no backticks, no explanation whatsoever.' }
       ]
     }],
-    'You are a recipe extraction assistant. Return only a valid JSON array. No markdown, no backticks.'
+    'You are a recipe extraction assistant. Return only a raw valid JSON array of all recipes found. No markdown, no backticks, no text outside the JSON array itself.',
+    4000
   )
-  return parseJSON(raw)
+  // Robustly extract the JSON array even if there is stray text
+  let cleaned = raw.trim()
+  const startIdx = cleaned.indexOf('[')
+  const endIdx = cleaned.lastIndexOf(']')
+  if (startIdx !== -1 && endIdx !== -1) cleaned = cleaned.slice(startIdx, endIdx + 1)
+  return JSON.parse(cleaned)
 }
